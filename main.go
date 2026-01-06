@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 )
@@ -71,7 +72,6 @@ func main() {
 	// キャッシュの有効性をチェックし、必要に応じて取得
 	cache, err := getCachedOrFetch(cacheFile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "使用状況データの取得エラー: %v\n", err)
 		// デフォルト値で継続
 		cache = &CacheData{Utilization: 0.0}
 	}
@@ -186,16 +186,47 @@ func fetchFromAPI(cacheFile string) (*CacheData, error) {
 	}
 
 	// キャッシュファイルに保存
-	if err := saveCache(cacheFile, cache); err != nil {
-		// エラーをログに出力するが、失敗させない
-		fmt.Fprintf(os.Stderr, "警告: キャッシュの保存に失敗: %v\n", err)
-	}
+	// エラーが発生してもサイレントに処理し、プログラムは継続する
+	_ = saveCache(cacheFile, cache)
 
 	return cache, nil
 }
 
-// getAccessToken は認証情報ファイルからアクセストークンを読み込む
+// getAccessToken は認証情報を取得する
+// macOSの場合はKeychainから、それ以外はファイルから取得
 func getAccessToken() (string, error) {
+	// macOSの場合、Keychainから取得を試みる
+	token, err := getAccessTokenFromKeychain()
+	if err == nil && token != "" {
+		return token, nil
+	}
+
+	// Keychainからの取得に失敗した場合、ファイルから取得を試みる
+	return getAccessTokenFromFile()
+}
+
+// getAccessTokenFromKeychain はmacOSのKeychainから認証情報を取得
+func getAccessTokenFromKeychain() (string, error) {
+	cmd := exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials", "-w")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	var creds Credentials
+	if err := json.Unmarshal(output, &creds); err != nil {
+		return "", err
+	}
+
+	if creds.ClaudeAiOauth.AccessToken == "" {
+		return "", fmt.Errorf("アクセストークンが空です")
+	}
+
+	return creds.ClaudeAiOauth.AccessToken, nil
+}
+
+// getAccessTokenFromFile はファイルから認証情報を取得
+func getAccessTokenFromFile() (string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", err

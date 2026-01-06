@@ -11,3 +11,8 @@ coverage.out
 # IDE
 .vscode/
 .idea/
+
+# Claude Code local settings
+.claude/settings.local.json
+.claude/*.local.json
+.claude/*.local.md
