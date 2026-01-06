@@ -84,10 +84,10 @@ func main() {
 
 	// ステータスラインを出力
 	if resetTime != "" {
-		fmt.Printf("Model: %s | Total Tokens: %s | 5h Usage: %s%% | 5h Resets: %s\n",
+		fmt.Printf("go-statusline | Model: %s | Total Tokens: %s | 5h Usage: %s%% | 5h Resets: %s\n",
 			input.Model.DisplayName, totalTokensStr, fiveHourUsage, resetTime)
 	} else {
-		fmt.Printf("Model: %s | Total Tokens: %s | 5h Usage: %s%% | 5h Resets: N/A\n",
+		fmt.Printf("go-statusline | Model: %s | Total Tokens: %s | 5h Usage: %s%% | 5h Resets: N/A\n",
 			input.Model.DisplayName, totalTokensStr, fiveHourUsage)
 	}
 }
