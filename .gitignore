@@ -1,0 +1,13 @@
+# Binaries
+statusline
+bin/
+
+# Test coverage
+coverage.out
+
+# Go build cache
+*.tmp
+
+# IDE
+.vscode/
+.idea/
