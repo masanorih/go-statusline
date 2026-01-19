@@ -11,10 +11,14 @@ import (
 )
 
 const (
-	pollInterval = 2 * time.Minute                                // キャッシュの有効期限（2分）
-	apiEndpoint  = "https://api.anthropic.com/api/oauth/usage"   // Anthropic API エンドポイント
-	apiBeta      = "oauth-2025-04-20"                             // API ベータ版指定
+	pollInterval     = 2 * time.Minute                            // 最大キャッシュ有効期限（2分）
+	minFetchInterval = 30 * time.Second                           // 最小APIアクセス間隔（30秒）
+	apiEndpoint      = "https://api.anthropic.com/api/oauth/usage" // Anthropic API エンドポイント
+	apiBeta          = "oauth-2025-04-20"                          // API ベータ版指定
 )
+
+// getHistoryModTimeFunc は history.jsonl の更新時刻を取得する関数（テスト用に差し替え可能）
+var getHistoryModTimeFunc = getHistoryModTime
 
 // InputData は Claude Code から渡される標準入力のJSON構造
 type InputData struct {
@@ -109,8 +113,27 @@ func isCacheValid(cache *CacheData) bool {
 	if cache.ResetsAt == "" {
 		return false
 	}
-	cacheAge := time.Since(time.Unix(cache.CachedAt, 0))
-	return cacheAge < pollInterval
+
+	cacheTime := time.Unix(cache.CachedAt, 0)
+	cacheAge := time.Since(cacheTime)
+
+	// 最小インターバル以内なら常に有効（API保護）
+	if cacheAge < minFetchInterval {
+		return true
+	}
+
+	// 最大キャッシュ有効期限を超えていたら無効
+	if cacheAge >= pollInterval {
+		return false
+	}
+
+	// history.jsonl がキャッシュより新しければ無効
+	historyModTime, err := getHistoryModTimeFunc()
+	if err == nil && historyModTime.After(cacheTime) {
+		return false
+	}
+
+	return true
 }
 
 // getCachedOrFetch はキャッシュデータを取得、またはAPIから取得
@@ -290,6 +313,22 @@ func saveCache(cacheFile string, cache *CacheData) error {
 
 	// アトミックなリネーム
 	return os.Rename(tmpFile, cacheFile)
+}
+
+// getHistoryModTime は history.jsonl の更新時刻を取得
+func getHistoryModTime() (time.Time, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	historyFile := filepath.Join(homeDir, ".claude", "history.jsonl")
+	info, err := os.Stat(historyFile)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	return info.ModTime(), nil
 }
 
 // formatResetTime はリセット時刻をHH:MM形式にフォーマット
