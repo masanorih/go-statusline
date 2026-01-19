@@ -45,22 +45,22 @@ func TestIsCacheValid(t *testing.T) {
 		},
 		{
 			name:     "fresh cache (1 minute old)",
-			cache:    &CacheData{CachedAt: time.Now().Unix() - 60},
+			cache:    &CacheData{CachedAt: time.Now().Unix() - 60, ResetsAt: "2026-01-06T10:00:00Z"},
 			expected: true,
 		},
 		{
-			name:     "valid cache (5 minutes old)",
-			cache:    &CacheData{CachedAt: time.Now().Unix() - 300},
-			expected: true,
-		},
-		{
-			name:     "expired cache (11 minutes old)",
-			cache:    &CacheData{CachedAt: time.Now().Unix() - 660},
+			name:     "expired cache (3 minutes old)",
+			cache:    &CacheData{CachedAt: time.Now().Unix() - 180, ResetsAt: "2026-01-06T10:00:00Z"},
 			expected: false,
 		},
 		{
 			name:     "very old cache (1 hour old)",
-			cache:    &CacheData{CachedAt: time.Now().Unix() - 3600},
+			cache:    &CacheData{CachedAt: time.Now().Unix() - 3600, ResetsAt: "2026-01-06T10:00:00Z"},
+			expected: false,
+		},
+		{
+			name:     "empty ResetsAt (invalid cache)",
+			cache:    &CacheData{CachedAt: time.Now().Unix() - 60, ResetsAt: ""},
 			expected: false,
 		},
 	}

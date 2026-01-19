@@ -92,7 +92,7 @@ GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o statusline-darwin-arm64
 Claude Code を起動すると、ステータスラインに以下のような情報が表示されます：
 
 ```
-go-statusline | Model: Sonnet 4.5 | Total Tokens: 200.0k | 5h Usage: 34.00% | 5h Resets: 14:00
+go-statusline | Model: Sonnet 4.5 | Total Tokens: 200.0k | 5h Usage: 34.0% | 5h Resets: 14:00
 ```
 
 ## 出力フィールド

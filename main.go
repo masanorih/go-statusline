@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	pollInterval = 10 * time.Minute                               // キャッシュの有効期限（10分）
+	pollInterval = 2 * time.Minute                                // キャッシュの有効期限（2分）
 	apiEndpoint  = "https://api.anthropic.com/api/oauth/usage"   // Anthropic API エンドポイント
 	apiBeta      = "oauth-2025-04-20"                             // API ベータ版指定
 )
@@ -80,7 +80,7 @@ func main() {
 	resetTime := formatResetTime(cache.ResetsAt)
 
 	// 5時間使用率をフォーマット
-	fiveHourUsage := fmt.Sprintf("%.2f", cache.Utilization)
+	fiveHourUsage := fmt.Sprintf("%.1f", cache.Utilization)
 
 	// ステータスラインを出力
 	if resetTime != "" {
@@ -103,6 +103,10 @@ func formatTokens(tokens int64) string {
 // isCacheValid はキャッシュが有効かどうかをチェック
 func isCacheValid(cache *CacheData) bool {
 	if cache.CachedAt == 0 {
+		return false
+	}
+	// キャッシュに有効なデータが含まれているか検証
+	if cache.ResetsAt == "" {
 		return false
 	}
 	cacheAge := time.Since(time.Unix(cache.CachedAt, 0))
@@ -176,6 +180,11 @@ func fetchFromAPI(cacheFile string) (*CacheData, error) {
 	var apiResp APIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
 		return nil, err
+	}
+
+	// APIレスポンスに有効なデータが含まれているか検証
+	if apiResp.FiveHour.ResetsAt == "" {
+		return nil, fmt.Errorf("APIレスポンスに有効なデータが含まれていません")
 	}
 
 	// キャッシュデータを作成
