@@ -11,10 +11,17 @@ import (
 )
 
 const (
-	pollInterval     = 2 * time.Minute                            // 最大キャッシュ有効期限（2分）
-	minFetchInterval = 30 * time.Second                           // 最小APIアクセス間隔（30秒）
+	pollInterval     = 2 * time.Minute                             // 最大キャッシュ有効期限（2分）
+	minFetchInterval = 30 * time.Second                            // 最小APIアクセス間隔（30秒）
 	apiEndpoint      = "https://api.anthropic.com/api/oauth/usage" // Anthropic API エンドポイント
 	apiBeta          = "oauth-2025-04-20"                          // API ベータ版指定
+
+	// ANSI カラーコード
+	colorReset  = "\033[0m"
+	colorGreen  = "\033[32m"
+	colorYellow = "\033[33m"
+	colorOrange = "\033[38;5;208m"
+	colorRed    = "\033[31m"
 )
 
 // getHistoryModTimeFunc は history.jsonl の更新時刻を取得する関数（テスト用に差し替え可能）
@@ -83,15 +90,15 @@ func main() {
 	// リセット時刻をフォーマット
 	resetTime := formatResetTime(cache.ResetsAt)
 
-	// 5時間使用率をフォーマット
-	fiveHourUsage := fmt.Sprintf("%.1f", cache.Utilization)
+	// 5時間使用率をフォーマット（色付き）
+	fiveHourUsage := colorizeUsage(cache.Utilization)
 
 	// ステータスラインを出力
 	if resetTime != "" {
-		fmt.Printf("go-statusline | Model: %s | Total Tokens: %s | 5h Usage: %s%% | 5h Resets: %s\n",
+		fmt.Printf("go-statusline | Model: %s | Total Tokens: %s | 5h Usage: %s | 5h Resets: %s\n",
 			input.Model.DisplayName, totalTokensStr, fiveHourUsage, resetTime)
 	} else {
-		fmt.Printf("go-statusline | Model: %s | Total Tokens: %s | 5h Usage: %s%% | 5h Resets: N/A\n",
+		fmt.Printf("go-statusline | Model: %s | Total Tokens: %s | 5h Usage: %s | 5h Resets: N/A\n",
 			input.Model.DisplayName, totalTokensStr, fiveHourUsage)
 	}
 }
@@ -102,6 +109,22 @@ func formatTokens(tokens int64) string {
 		return fmt.Sprintf("%.1fk", float64(tokens)/1000.0)
 	}
 	return fmt.Sprintf("%d", tokens)
+}
+
+// colorizeUsage は使用率に応じて色付けした文字列を返す
+func colorizeUsage(usage float64) string {
+	var color string
+	switch {
+	case usage < 25:
+		color = colorGreen
+	case usage < 50:
+		color = colorYellow
+	case usage < 75:
+		color = colorOrange
+	default:
+		color = colorRed
+	}
+	return fmt.Sprintf("%s%.1f%%%s", color, usage, colorReset)
 }
 
 // isCacheValid はキャッシュが有効かどうかをチェック

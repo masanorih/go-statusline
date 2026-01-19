@@ -429,3 +429,29 @@ func BenchmarkFormatResetTime(b *testing.B) {
 		formatResetTime(resetTime)
 	}
 }
+
+func TestColorizeUsage(t *testing.T) {
+	tests := []struct {
+		name     string
+		usage    float64
+		expected string
+	}{
+		{"0%は緑", 0.0, "\033[32m0.0%\033[0m"},
+		{"24.9%は緑", 24.9, "\033[32m24.9%\033[0m"},
+		{"25%は黄色", 25.0, "\033[33m25.0%\033[0m"},
+		{"49.9%は黄色", 49.9, "\033[33m49.9%\033[0m"},
+		{"50%はオレンジ", 50.0, "\033[38;5;208m50.0%\033[0m"},
+		{"74.9%はオレンジ", 74.9, "\033[38;5;208m74.9%\033[0m"},
+		{"75%は赤", 75.0, "\033[31m75.0%\033[0m"},
+		{"100%は赤", 100.0, "\033[31m100.0%\033[0m"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := colorizeUsage(tt.usage)
+			if result != tt.expected {
+				t.Errorf("colorizeUsage(%v) = %q, want %q", tt.usage, result, tt.expected)
+			}
+		})
+	}
+}
