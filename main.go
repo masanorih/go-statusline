@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -111,8 +112,10 @@ func formatTokens(tokens int64) string {
 	return fmt.Sprintf("%d", tokens)
 }
 
-// colorizeUsage は使用率に応じて色付けした文字列を返す
+// colorizeUsage は使用率に応じて色付けした文字列とプログレスバーを返す
 func colorizeUsage(usage float64) string {
+	const barWidth = 20
+
 	var color string
 	switch {
 	case usage < 25:
@@ -124,7 +127,15 @@ func colorizeUsage(usage float64) string {
 	default:
 		color = colorRed
 	}
-	return fmt.Sprintf("%s%.1f%%%s", color, usage, colorReset)
+
+	// バーの塗りつぶし文字数を計算
+	filled := int(usage / 100.0 * float64(barWidth))
+	if filled > barWidth {
+		filled = barWidth
+	}
+
+	bar := strings.Repeat("█", filled) + strings.Repeat(" ", barWidth-filled)
+	return fmt.Sprintf("%s%.1f%% [%s]%s", color, usage, bar, colorReset)
 }
 
 // isCacheValid はキャッシュが有効かどうかをチェック

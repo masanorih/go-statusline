@@ -92,8 +92,14 @@ GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o statusline-darwin-arm64
 Claude Code を起動すると、ステータスラインに以下のような情報が表示されます：
 
 ```
-go-statusline | Model: Sonnet 4.5 | Total Tokens: 200.0k | 5h Usage: 34.0% | 5h Resets: 14:00
+go-statusline | Model: Sonnet 4.5 | Total Tokens: 200.0k | 5h Usage: 34.0% [██████              ] | 5h Resets: 14:00
 ```
+
+5h Usage はプログレスバー（20文字幅）付きで表示され、使用率に応じて色が変化します：
+- 0-24%: 緑
+- 25-49%: 黄
+- 50-74%: オレンジ
+- 75-100%: 赤
 
 ## 出力フィールド
 
@@ -101,12 +107,12 @@ go-statusline | Model: Sonnet 4.5 | Total Tokens: 200.0k | 5h Usage: 34.0% | 5h 
 |-----------|------|
 | Model | 現在のモデル名 |
 | Total Tokens | 累積トークン数（入力 + 出力） |
-| 5h Usage | 5時間使用率（パーセンテージ） |
+| 5h Usage | 5時間使用率（パーセンテージ + プログレスバー） |
 | 5h Resets | 次のリセット時刻（HH:MM形式） |
 
 ## キャッシュ
 
-使用データは `~/.claude/.usage_cache.json` にキャッシュされます。キャッシュの有効期限は **10分間** で、期限が切れると自動的にAPIから最新のデータを取得します。
+使用データは `~/.claude/.usage_cache.json` にキャッシュされます。キャッシュの有効期限は **2分間** で、期限が切れると自動的にAPIから最新のデータを取得します。また、`history.jsonl` が更新された場合もキャッシュを無効化してAPIから再取得します（ただし最小30秒間隔）。
 
 ### キャッシュ構造
 
