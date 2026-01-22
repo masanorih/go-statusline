@@ -113,6 +113,7 @@ func formatTokens(tokens int64) string {
 }
 
 // colorizeUsage は使用率に応じて色付けした文字列とプログレスバーを返す
+// シェードブロック文字を使用して約1.25%単位の粒度を実現
 func colorizeUsage(usage float64) string {
 	const barWidth = 20
 
@@ -129,12 +130,39 @@ func colorizeUsage(usage float64) string {
 	}
 
 	// バーの塗りつぶし文字数を計算
-	filled := int(usage / 100.0 * float64(barWidth))
+	totalBlocks := usage / 100.0 * float64(barWidth)
+
+	// 負の値は0にクリップ
+	if totalBlocks < 0 {
+		totalBlocks = 0
+	}
+
+	filled := int(totalBlocks)
 	if filled > barWidth {
 		filled = barWidth
 	}
 
-	bar := strings.Repeat("█", filled) + strings.Repeat(" ", barWidth-filled)
+	// 小数部分からシェード文字を選択
+	var shade string
+	shadeWidth := 0
+	if filled < barWidth {
+		fraction := totalBlocks - float64(filled)
+		switch {
+		case fraction >= 0.75:
+			shade = "▓"
+			shadeWidth = 1
+		case fraction >= 0.50:
+			shade = "▒"
+			shadeWidth = 1
+		case fraction >= 0.25:
+			shade = "░"
+			shadeWidth = 1
+		}
+	}
+
+	// バーを構築: 完全ブロック + シェード + 空白
+	empty := barWidth - filled - shadeWidth
+	bar := strings.Repeat("█", filled) + shade + strings.Repeat(" ", empty)
 	return fmt.Sprintf("%s%.1f%% [%s]%s", color, usage, bar, colorReset)
 }
 
