@@ -1,16 +1,10 @@
-# statusline (golang version)
+# statusline
 
-Claude Code ステータスライン表示ツール - golang実装版
+Claude Code ステータスライン表示ツール
 
 ## 概要
 
 このプログラムは、Claude Code のステータスラインにモデル名、トークン使用量、5時間使用率、リセット時刻を表示します。
-
-Bash版からの主な改善点：
-- **50-100倍の高速化** (起動時間: 80-230ms → 1-3ms)
-- **安定したメモリ使用量** (5-20MB変動 → 3-6MB固定)
-- **プロセス起動回数の削減** (10-15回 → 1回)
-- **外部依存なし** (標準ライブラリのみ使用)
 
 ## 必要環境
 
@@ -139,20 +133,10 @@ BenchmarkIsCacheValid-16      26394518     45.86 ns/op    0 B/op    0 allocs/op
 BenchmarkFormatResetTime-16   11438455    103.8 ns/op     5 B/op    1 allocs/op
 ```
 
-### Bash版との比較
-
-| 項目 | Bash版 | golang版 | 改善率 |
-|------|--------|------|--------|
-| 起動時間 | 80-230ms | 1-3ms | **95-98%削減** |
-| プロセス起動 | 10-15回 | 1回 | **90%削減** |
-| メモリ使用量 | 5-20MB変動 | 3-6MB固定 | **安定化** |
-| バイナリサイズ | N/A | 4.9MB | - |
-
 ## ライセンス
 
 MIT License
 
 ## 関連リンク
 
-- [Bash版](https://github.com/masanorih/statusline.sh)
 - [Claude Code](https://claude.com/claude-code)
