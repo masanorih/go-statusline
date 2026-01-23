@@ -113,7 +113,7 @@ func formatTokens(tokens int64) string {
 }
 
 // colorizeUsage は使用率に応じて色付けした文字列とプログレスバーを返す
-// シェードブロック文字を使用して約1.25%単位の粒度を実現
+// 下方向部分ブロック文字(▁▂▃▅▆▇)で6段階の小数部を表現
 func colorizeUsage(usage float64) string {
 	const barWidth = 20
 
@@ -142,20 +142,29 @@ func colorizeUsage(usage float64) string {
 		filled = barWidth
 	}
 
-	// 小数部分からシェード文字を選択
+	// 小数部分から下方向部分ブロック文字を選択
 	var shade string
 	shadeWidth := 0
 	if filled < barWidth {
 		fraction := totalBlocks - float64(filled)
 		switch {
-		case fraction >= 0.75:
-			shade = "▓"
+		case fraction >= 5.0/6.0:
+			shade = "▇"
 			shadeWidth = 1
-		case fraction >= 0.50:
-			shade = "▒"
+		case fraction >= 4.0/6.0:
+			shade = "▆"
 			shadeWidth = 1
-		case fraction >= 0.25:
-			shade = "░"
+		case fraction >= 3.0/6.0:
+			shade = "▅"
+			shadeWidth = 1
+		case fraction >= 2.0/6.0:
+			shade = "▃"
+			shadeWidth = 1
+		case fraction >= 1.0/6.0:
+			shade = "▂"
+			shadeWidth = 1
+		case fraction > 0:
+			shade = "▁"
 			shadeWidth = 1
 		}
 	}
