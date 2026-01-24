@@ -279,6 +279,46 @@ func TestCacheOperations(t *testing.T) {
 			t.Fatalf("cache file is not valid JSON: %v", err)
 		}
 	})
+
+	t.Run("save and read cache with weekly data", func(t *testing.T) {
+		testCache := &CacheData{
+			ResetsAt:          "2026-01-24T06:59:59Z",
+			Utilization:       34.0,
+			WeeklyUtilization: 22.0,
+			CachedAt:          time.Now().Unix(),
+		}
+
+		err := saveCache(cacheFile, testCache)
+		if err != nil {
+			t.Fatalf("saveCache() failed: %v", err)
+		}
+
+		readResult, err := readCache(cacheFile)
+		if err != nil {
+			t.Fatalf("readCache() failed: %v", err)
+		}
+
+		if readResult.WeeklyUtilization != testCache.WeeklyUtilization {
+			t.Errorf("WeeklyUtilization = %f, expected %f", readResult.WeeklyUtilization, testCache.WeeklyUtilization)
+		}
+	})
+
+	t.Run("backward compatible cache without weekly fields", func(t *testing.T) {
+		oldCache := `{"resets_at":"2026-01-05T10:30:00Z","utilization":50.0,"cached_at":1234567890}`
+		err := os.WriteFile(cacheFile, []byte(oldCache), 0644)
+		if err != nil {
+			t.Fatalf("failed to write old cache: %v", err)
+		}
+
+		readResult, err := readCache(cacheFile)
+		if err != nil {
+			t.Fatalf("readCache() failed: %v", err)
+		}
+
+		if readResult.WeeklyUtilization != 0.0 {
+			t.Errorf("WeeklyUtilization should be 0.0 for old cache, got %f", readResult.WeeklyUtilization)
+		}
+	})
 }
 
 func TestInputDataParsing(t *testing.T) {
@@ -385,6 +425,54 @@ func TestAPIResponseParsing(t *testing.T) {
 
 		if response.FiveHour.Utilization != 100.0 {
 			t.Errorf("Utilization = %f, expected 100.0", response.FiveHour.Utilization)
+		}
+	})
+
+	t.Run("valid API response with seven_day", func(t *testing.T) {
+		jsonResponse := `{
+			"five_hour": {
+				"resets_at": "2026-01-24T06:59:59Z",
+				"utilization": 9.0
+			},
+			"seven_day": {
+				"resets_at": "2026-01-29T04:59:59Z",
+				"utilization": 22.0
+			}
+		}`
+
+		var response APIResponse
+		err := json.Unmarshal([]byte(jsonResponse), &response)
+		if err != nil {
+			t.Fatalf("failed to parse API response: %v", err)
+		}
+
+		if response.SevenDay.ResetsAt != "2026-01-29T04:59:59Z" {
+			t.Errorf("SevenDay.ResetsAt = %s, expected 2026-01-29T04:59:59Z", response.SevenDay.ResetsAt)
+		}
+		if response.SevenDay.Utilization != 22.0 {
+			t.Errorf("SevenDay.Utilization = %f, expected 22.0", response.SevenDay.Utilization)
+		}
+	})
+
+	t.Run("API response without seven_day", func(t *testing.T) {
+		jsonResponse := `{
+			"five_hour": {
+				"resets_at": "2026-01-05T10:30:00Z",
+				"utilization": 50.0
+			}
+		}`
+
+		var response APIResponse
+		err := json.Unmarshal([]byte(jsonResponse), &response)
+		if err != nil {
+			t.Fatalf("failed to parse API response: %v", err)
+		}
+
+		if response.SevenDay.Utilization != 0.0 {
+			t.Errorf("SevenDay.Utilization = %f, expected 0.0", response.SevenDay.Utilization)
+		}
+		if response.SevenDay.ResetsAt != "" {
+			t.Errorf("SevenDay.ResetsAt = %s, expected empty", response.SevenDay.ResetsAt)
 		}
 	})
 }

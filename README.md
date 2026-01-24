@@ -4,7 +4,7 @@ Claude Code ステータスライン表示ツール
 
 ## 概要
 
-このプログラムは、Claude Code のステータスラインにモデル名、トークン使用量、5時間使用率、リセット時刻を表示します。
+このプログラムは、Claude Code のステータスラインにモデル名、トークン使用量、5時間使用率、週間使用率、リセット時刻を表示します。
 
 ## 必要環境
 
@@ -85,11 +85,11 @@ GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o statusline-darwin-arm64
 
 Claude Code を起動すると、ステータスラインに以下のような情報が表示されます：
 
-```
-go-statusline | Model: Sonnet 4.5 | Total Tokens: 200.0k | 5h Usage: 34.0% [██████              ] | 5h Resets: 14:00
+```ansi
+go-statusline | Model: Sonnet 4.5 | Total Tokens: 200.0k | 5h: [33m34.0% [██████▆             ][0m | resets: 14:00 | week: [32m22.0% [████▃               ][0m
 ```
 
-5h Usage はプログレスバー（20文字幅）付きで表示され、使用率に応じて色が変化します：
+5h, week はプログレスバー（20文字幅）付きで表示され、使用率に応じて色が変化します：
 - 0-24%: 緑
 - 25-49%: 黄
 - 50-74%: オレンジ
@@ -101,8 +101,9 @@ go-statusline | Model: Sonnet 4.5 | Total Tokens: 200.0k | 5h Usage: 34.0% [█�
 |-----------|------|
 | Model | 現在のモデル名 |
 | Total Tokens | 累積トークン数（入力 + 出力） |
-| 5h Usage | 5時間使用率（パーセンテージ + プログレスバー） |
-| 5h Resets | 次のリセット時刻（HH:MM形式） |
+| 5h | 5時間使用率（パーセンテージ + プログレスバー） |
+| resets | 5時間枠の次のリセット時刻（HH:MM形式） |
+| week | 週間使用率（パーセンテージ + プログレスバー） |
 
 ## キャッシュ
 
@@ -114,6 +115,7 @@ go-statusline | Model: Sonnet 4.5 | Total Tokens: 200.0k | 5h Usage: 34.0% [█�
 {
   "resets_at": "2026-01-05T14:00:00Z",
   "utilization": 34.0,
+  "weekly_utilization": 22.0,
   "cached_at": 1736072345
 }
 ```

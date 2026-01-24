@@ -41,9 +41,10 @@ type InputData struct {
 
 // CacheData はキャッシュされる使用状況データ
 type CacheData struct {
-	ResetsAt    string  `json:"resets_at"`    // リセット時刻（ISO8601形式）
-	Utilization float64 `json:"utilization"`  // 5時間使用率（0-100）
-	CachedAt    int64   `json:"cached_at"`    // キャッシュ作成時刻（Unix時刻）
+	ResetsAt          string  `json:"resets_at"`          // リセット時刻（ISO8601形式）
+	Utilization       float64 `json:"utilization"`        // 5時間使用率（0-100）
+	WeeklyUtilization float64 `json:"weekly_utilization"` // 週間使用率（0-100）
+	CachedAt          int64   `json:"cached_at"`          // キャッシュ作成時刻（Unix時刻）
 }
 
 // Credentials は OAuth 認証情報
@@ -59,6 +60,10 @@ type APIResponse struct {
 		ResetsAt    string  `json:"resets_at"`
 		Utilization float64 `json:"utilization"`
 	} `json:"five_hour"`
+	SevenDay struct {
+		ResetsAt    string  `json:"resets_at"`
+		Utilization float64 `json:"utilization"`
+	} `json:"seven_day"`
 }
 
 func main() {
@@ -91,16 +96,17 @@ func main() {
 	// リセット時刻をフォーマット
 	resetTime := formatResetTime(cache.ResetsAt)
 
-	// 5時間使用率をフォーマット（色付き）
+	// 使用率をフォーマット（色付き）
 	fiveHourUsage := colorizeUsage(cache.Utilization)
+	weeklyUsage := colorizeUsage(cache.WeeklyUtilization)
 
 	// ステータスラインを出力
 	if resetTime != "" {
-		fmt.Printf("go-statusline | Model: %s | Total Tokens: %s | 5h Usage: %s | 5h Resets: %s\n",
-			input.Model.DisplayName, totalTokensStr, fiveHourUsage, resetTime)
+		fmt.Printf("go-statusline | Model: %s | Total Tokens: %s | 5h: %s | resets: %s | week: %s\n",
+			input.Model.DisplayName, totalTokensStr, fiveHourUsage, resetTime, weeklyUsage)
 	} else {
-		fmt.Printf("go-statusline | Model: %s | Total Tokens: %s | 5h Usage: %s | 5h Resets: N/A\n",
-			input.Model.DisplayName, totalTokensStr, fiveHourUsage)
+		fmt.Printf("go-statusline | Model: %s | Total Tokens: %s | 5h: %s | resets: N/A | week: %s\n",
+			input.Model.DisplayName, totalTokensStr, fiveHourUsage, weeklyUsage)
 	}
 }
 
@@ -283,9 +289,10 @@ func fetchFromAPI(cacheFile string) (*CacheData, error) {
 
 	// キャッシュデータを作成
 	cache := &CacheData{
-		ResetsAt:    apiResp.FiveHour.ResetsAt,
-		Utilization: apiResp.FiveHour.Utilization,
-		CachedAt:    time.Now().Unix(),
+		ResetsAt:          apiResp.FiveHour.ResetsAt,
+		Utilization:       apiResp.FiveHour.Utilization,
+		WeeklyUtilization: apiResp.SevenDay.Utilization,
+		CachedAt:          time.Now().Unix(),
 	}
 
 	// キャッシュファイルに保存
