@@ -85,8 +85,8 @@ GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o statusline-darwin-arm64
 
 Claude Code を起動すると、ステータスラインに以下のような情報が表示されます：
 
-```ansi
-go-statusline | Model: Sonnet 4.5 | Total Tokens: 200.0k | 5h: [33m34.0% [██████▆             ][0m | resets: 14:00 | week: [32m22.0% [████▃               ][0m
+```
+go-statusline | Model: Sonnet 4.5 | Total Tokens: 200.0k | 5h: 34.0% [██████▆             ] | resets: 14:00 | week: 22.0% [████▃               ]
 ```
 
 5h, week はプログレスバー（20文字幅）付きで表示され、使用率に応じて色が変化します：
