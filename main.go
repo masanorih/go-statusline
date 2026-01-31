@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -26,7 +27,72 @@ const (
 )
 
 // getHistoryModTimeFunc は history.jsonl の更新時刻を取得する関数（テスト用に差し替え可能）
+// Deprecated: StatusLine構造体の依存性注入を使用してください
 var getHistoryModTimeFunc = getHistoryModTime
+
+// StatusLine はステータスライン生成の依存性を管理する構造体
+type StatusLine struct {
+	httpClient        *http.Client
+	getHistoryModTime func() (time.Time, error)
+	getAccessToken    func() (string, error)
+	execCommand       func(name string, arg ...string) *exec.Cmd
+	stderr            io.Writer
+}
+
+// StatusLineOption は StatusLine のオプション設定用関数型
+type StatusLineOption func(*StatusLine)
+
+// NewStatusLine は新しい StatusLine インスタンスを作成
+func NewStatusLine(opts ...StatusLineOption) *StatusLine {
+	sl := &StatusLine{
+		httpClient:        &http.Client{Timeout: 10 * time.Second},
+		getHistoryModTime: getHistoryModTime,
+		getAccessToken:    getAccessToken,
+		execCommand:       exec.Command,
+		stderr:            os.Stderr,
+	}
+
+	for _, opt := range opts {
+		opt(sl)
+	}
+
+	return sl
+}
+
+// WithHTTPClient はカスタムHTTPクライアントを設定
+func WithHTTPClient(client *http.Client) StatusLineOption {
+	return func(sl *StatusLine) {
+		sl.httpClient = client
+	}
+}
+
+// WithHistoryModTimeFunc はカスタムのhistory更新時刻取得関数を設定
+func WithHistoryModTimeFunc(fn func() (time.Time, error)) StatusLineOption {
+	return func(sl *StatusLine) {
+		sl.getHistoryModTime = fn
+	}
+}
+
+// WithAccessTokenFunc はカスタムのアクセストークン取得関数を設定
+func WithAccessTokenFunc(fn func() (string, error)) StatusLineOption {
+	return func(sl *StatusLine) {
+		sl.getAccessToken = fn
+	}
+}
+
+// WithExecCommand はカスタムのexec.Command関数を設定（テスト用）
+func WithExecCommand(fn func(name string, arg ...string) *exec.Cmd) StatusLineOption {
+	return func(sl *StatusLine) {
+		sl.execCommand = fn
+	}
+}
+
+// WithStderr はカスタムのstderr出力先を設定（テスト用）
+func WithStderr(w io.Writer) StatusLineOption {
+	return func(sl *StatusLine) {
+		sl.stderr = w
+	}
+}
 
 // InputData は Claude Code から渡される標準入力のJSON構造
 type InputData struct {
@@ -67,11 +133,20 @@ type APIResponse struct {
 }
 
 func main() {
+	sl := NewStatusLine()
+	if err := sl.run(os.Stdin, os.Stdout, ""); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		os.Exit(1)
+	}
+}
+
+// run はメインロジックを実行（テスト可能）
+// cacheFileが空の場合はデフォルトパスを使用
+func (sl *StatusLine) run(stdin io.Reader, stdout io.Writer, cacheFile string) error {
 	// 標準入力からJSONを読み込む
 	var input InputData
-	if err := json.NewDecoder(os.Stdin).Decode(&input); err != nil {
-		fmt.Fprintf(os.Stderr, "入力の読み込みエラー: %v\n", err)
-		os.Exit(1)
+	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
+		return fmt.Errorf("failed to read input: %w", err)
 	}
 
 	// 累積トークン数を計算
@@ -79,15 +154,16 @@ func main() {
 	totalTokensStr := formatTokens(totalTokens)
 
 	// キャッシュファイルのパスを取得
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ホームディレクトリの取得エラー: %v\n", err)
-		os.Exit(1)
+	if cacheFile == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get home directory: %w", err)
+		}
+		cacheFile = filepath.Join(homeDir, ".claude", ".usage_cache.json")
 	}
-	cacheFile := filepath.Join(homeDir, ".claude", ".usage_cache.json")
 
 	// キャッシュの有効性をチェックし、必要に応じて取得
-	cache, err := getCachedOrFetch(cacheFile)
+	cache, err := sl.getCachedOrFetch(cacheFile, apiEndpoint)
 	if err != nil {
 		// デフォルト値で継続
 		cache = &CacheData{Utilization: 0.0}
@@ -97,17 +173,19 @@ func main() {
 	resetTime := formatResetTime(cache.ResetsAt)
 
 	// 使用率をフォーマット（色付き）
-	fiveHourUsage := colorizeUsage(cache.Utilization)
-	weeklyUsage := colorizeUsage(cache.WeeklyUtilization)
+	fiveHourUsage := sl.colorizeUsage(cache.Utilization)
+	weeklyUsage := sl.colorizeUsage(cache.WeeklyUtilization)
 
 	// ステータスラインを出力
 	if resetTime != "" {
-		fmt.Printf("go-statusline | Model: %s | Total Tokens: %s | 5h: %s | resets: %s | week: %s\n",
+		fmt.Fprintf(stdout, "go-statusline | Model: %s | Total Tokens: %s | 5h: %s | resets: %s | week: %s\n",
 			input.Model.DisplayName, totalTokensStr, fiveHourUsage, resetTime, weeklyUsage)
 	} else {
-		fmt.Printf("go-statusline | Model: %s | Total Tokens: %s | 5h: %s | resets: N/A | week: %s\n",
+		fmt.Fprintf(stdout, "go-statusline | Model: %s | Total Tokens: %s | 5h: %s | resets: N/A | week: %s\n",
 			input.Model.DisplayName, totalTokensStr, fiveHourUsage, weeklyUsage)
 	}
+
+	return nil
 }
 
 // formatTokens はトークン数をフォーマット（1000以上は"k"単位）
@@ -121,6 +199,22 @@ func formatTokens(tokens int64) string {
 // colorizeUsage は使用率に応じて色付けした文字列とプログレスバーを返す
 // 下方向部分ブロック文字(▁▂▃▅▆▇)で6段階の小数部を表現
 func colorizeUsage(usage float64) string {
+	sl := &StatusLine{stderr: io.Discard}
+	return sl.colorizeUsage(usage)
+}
+
+// colorizeUsage は使用率に応じて色付けした文字列とプログレスバーを返す（StatusLineメソッド版）
+func (sl *StatusLine) colorizeUsage(usage float64) string {
+	// 異常値の警告
+	if usage < 0 || usage > 100 {
+		fmt.Fprintf(sl.stderr, "warning: unexpected usage value: %.1f\n", usage)
+	}
+
+	return colorizeUsageInternal(usage)
+}
+
+// colorizeUsageInternal は使用率に応じて色付けした文字列とプログレスバーを返す（内部実装）
+func colorizeUsageInternal(usage float64) string {
 	const barWidth = 20
 
 	var color string
@@ -183,6 +277,12 @@ func colorizeUsage(usage float64) string {
 
 // isCacheValid はキャッシュが有効かどうかをチェック
 func isCacheValid(cache *CacheData) bool {
+	sl := &StatusLine{getHistoryModTime: getHistoryModTimeFunc}
+	return sl.isCacheValid(cache)
+}
+
+// isCacheValid はキャッシュが有効かどうかをチェック（StatusLineメソッド版）
+func (sl *StatusLine) isCacheValid(cache *CacheData) bool {
 	if cache.CachedAt == 0 {
 		return false
 	}
@@ -205,7 +305,7 @@ func isCacheValid(cache *CacheData) bool {
 	}
 
 	// history.jsonl がキャッシュより新しければ無効
-	historyModTime, err := getHistoryModTimeFunc()
+	historyModTime, err := sl.getHistoryModTime()
 	if err == nil && historyModTime.After(cacheTime) {
 		return false
 	}
@@ -215,16 +315,22 @@ func isCacheValid(cache *CacheData) bool {
 
 // getCachedOrFetch はキャッシュデータを取得、またはAPIから取得
 func getCachedOrFetch(cacheFile string) (*CacheData, error) {
+	sl := NewStatusLine()
+	return sl.getCachedOrFetch(cacheFile, apiEndpoint)
+}
+
+// getCachedOrFetch はキャッシュデータを取得、またはAPIから取得（StatusLineメソッド版）
+func (sl *StatusLine) getCachedOrFetch(cacheFile string, endpoint string) (*CacheData, error) {
 	// キャッシュの読み込みを試行
 	cache, err := readCache(cacheFile)
-	if err == nil && isCacheValid(cache) {
+	if err == nil && sl.isCacheValid(cache) {
 		return cache, nil
 	}
 
 	// キャッシュが無効または存在しない場合、APIから取得
-	cache, err = fetchFromAPI(cacheFile)
+	cache, err = sl.fetchFromAPI(cacheFile, endpoint)
 	if err != nil {
-		return nil, fmt.Errorf("APIからの取得に失敗: %w", err)
+		return nil, fmt.Errorf("failed to fetch from API: %w", err)
 	}
 
 	return cache, nil
@@ -248,14 +354,20 @@ func readCache(cacheFile string) (*CacheData, error) {
 
 // fetchFromAPI はAPIから使用状況データを取得してキャッシュを更新
 func fetchFromAPI(cacheFile string) (*CacheData, error) {
+	sl := NewStatusLine()
+	return sl.fetchFromAPI(cacheFile, apiEndpoint)
+}
+
+// fetchFromAPI はAPIから使用状況データを取得してキャッシュを更新（StatusLineメソッド版）
+func (sl *StatusLine) fetchFromAPI(cacheFile string, endpoint string) (*CacheData, error) {
 	// アクセストークンを取得
-	token, err := getAccessToken()
+	token, err := sl.getAccessToken()
 	if err != nil {
-		return nil, fmt.Errorf("アクセストークンの取得に失敗: %w", err)
+		return nil, fmt.Errorf("failed to get access token: %w", err)
 	}
 
 	// HTTPリクエストを作成
-	req, err := http.NewRequest("GET", apiEndpoint, nil)
+	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -265,15 +377,14 @@ func fetchFromAPI(cacheFile string) (*CacheData, error) {
 	req.Header.Set("anthropic-beta", apiBeta)
 
 	// リクエストを送信
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := sl.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("APIリクエストが失敗: ステータス %d", resp.StatusCode)
+		return nil, fmt.Errorf("API request failed: status %d", resp.StatusCode)
 	}
 
 	// レスポンスをパース
@@ -284,7 +395,7 @@ func fetchFromAPI(cacheFile string) (*CacheData, error) {
 
 	// APIレスポンスに有効なデータが含まれているか検証
 	if apiResp.FiveHour.ResetsAt == "" {
-		return nil, fmt.Errorf("APIレスポンスに有効なデータが含まれていません")
+		return nil, fmt.Errorf("API response contains no valid data")
 	}
 
 	// キャッシュデータを作成
@@ -296,8 +407,10 @@ func fetchFromAPI(cacheFile string) (*CacheData, error) {
 	}
 
 	// キャッシュファイルに保存
-	// エラーが発生してもサイレントに処理し、プログラムは継続する
-	_ = saveCache(cacheFile, cache)
+	// エラーが発生しても警告を出力してプログラムは継続する
+	if err := saveCache(cacheFile, cache); err != nil {
+		fmt.Fprintf(sl.stderr, "warning: failed to save cache: %v\n", err)
+	}
 
 	return cache, nil
 }
@@ -317,7 +430,13 @@ func getAccessToken() (string, error) {
 
 // getAccessTokenFromKeychain はmacOSのKeychainから認証情報を取得
 func getAccessTokenFromKeychain() (string, error) {
-	cmd := exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials", "-w")
+	sl := NewStatusLine()
+	return sl.getAccessTokenFromKeychain()
+}
+
+// getAccessTokenFromKeychain はmacOSのKeychainから認証情報を取得（StatusLineメソッド版）
+func (sl *StatusLine) getAccessTokenFromKeychain() (string, error) {
+	cmd := sl.execCommand("security", "find-generic-password", "-s", "Claude Code-credentials", "-w")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -329,7 +448,7 @@ func getAccessTokenFromKeychain() (string, error) {
 	}
 
 	if creds.ClaudeAiOauth.AccessToken == "" {
-		return "", fmt.Errorf("アクセストークンが空です")
+		return "", fmt.Errorf("access token is empty")
 	}
 
 	return creds.ClaudeAiOauth.AccessToken, nil
@@ -343,6 +462,11 @@ func getAccessTokenFromFile() (string, error) {
 	}
 
 	credFile := filepath.Join(homeDir, ".claude", ".credentials.json")
+	return getAccessTokenFromFileWithPath(credFile)
+}
+
+// getAccessTokenFromFileWithPath は指定されたパスから認証情報を取得（テスト用）
+func getAccessTokenFromFileWithPath(credFile string) (string, error) {
 	file, err := os.Open(credFile)
 	if err != nil {
 		return "", err
@@ -355,7 +479,7 @@ func getAccessTokenFromFile() (string, error) {
 	}
 
 	if creds.ClaudeAiOauth.AccessToken == "" {
-		return "", fmt.Errorf("アクセストークンが空です")
+		return "", fmt.Errorf("access token is empty")
 	}
 
 	return creds.ClaudeAiOauth.AccessToken, nil
@@ -401,12 +525,27 @@ func getHistoryModTime() (time.Time, error) {
 	}
 
 	historyFile := filepath.Join(homeDir, ".claude", "history.jsonl")
+	return getHistoryModTimeWithPath(historyFile)
+}
+
+// getHistoryModTimeWithPath は指定されたパスのファイル更新時刻を取得（テスト用）
+func getHistoryModTimeWithPath(historyFile string) (time.Time, error) {
 	info, err := os.Stat(historyFile)
 	if err != nil {
 		return time.Time{}, err
 	}
 
 	return info.ModTime(), nil
+}
+
+// roundUpToMinute は時刻を分単位で切り上げる
+// 秒数やナノ秒がある場合は次の分に切り上げ、ちょうどの分ならそのまま
+func roundUpToMinute(t time.Time) time.Time {
+	truncated := t.Truncate(time.Minute)
+	if t.After(truncated) {
+		return truncated.Add(time.Minute)
+	}
+	return truncated
 }
 
 // formatResetTime はリセット時刻をHH:MM形式にフォーマット
@@ -421,8 +560,8 @@ func formatResetTime(resetsAt string) string {
 		return ""
 	}
 
-	// 59秒を加算（切り上げ）
-	t = t.Add(59 * time.Second)
+	// 分単位で切り上げ
+	t = roundUpToMinute(t)
 
 	// ローカル時刻に変換してフォーマット
 	localTime := t.Local()

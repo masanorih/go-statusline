@@ -1,9 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -168,6 +174,59 @@ func TestIsCacheValidWithHistoryCheck(t *testing.T) {
 	})
 }
 
+func TestRoundUpToMinute(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    time.Time
+		expected time.Time
+	}{
+		{
+			name:     "exact minute (no seconds)",
+			input:    time.Date(2026, 1, 5, 10, 30, 0, 0, time.UTC),
+			expected: time.Date(2026, 1, 5, 10, 30, 0, 0, time.UTC),
+		},
+		{
+			name:     "1 second after minute",
+			input:    time.Date(2026, 1, 5, 10, 30, 1, 0, time.UTC),
+			expected: time.Date(2026, 1, 5, 10, 31, 0, 0, time.UTC),
+		},
+		{
+			name:     "30 seconds after minute",
+			input:    time.Date(2026, 1, 5, 10, 30, 30, 0, time.UTC),
+			expected: time.Date(2026, 1, 5, 10, 31, 0, 0, time.UTC),
+		},
+		{
+			name:     "59 seconds after minute",
+			input:    time.Date(2026, 1, 5, 10, 30, 59, 0, time.UTC),
+			expected: time.Date(2026, 1, 5, 10, 31, 0, 0, time.UTC),
+		},
+		{
+			name:     "nanoseconds only",
+			input:    time.Date(2026, 1, 5, 10, 30, 0, 1, time.UTC),
+			expected: time.Date(2026, 1, 5, 10, 31, 0, 0, time.UTC),
+		},
+		{
+			name:     "end of hour",
+			input:    time.Date(2026, 1, 5, 10, 59, 30, 0, time.UTC),
+			expected: time.Date(2026, 1, 5, 11, 0, 0, 0, time.UTC),
+		},
+		{
+			name:     "end of day",
+			input:    time.Date(2026, 1, 5, 23, 59, 30, 0, time.UTC),
+			expected: time.Date(2026, 1, 6, 0, 0, 0, 0, time.UTC),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := roundUpToMinute(tt.input)
+			if !result.Equal(tt.expected) {
+				t.Errorf("roundUpToMinute(%v) = %v, expected %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestFormatResetTime(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -317,6 +376,40 @@ func TestCacheOperations(t *testing.T) {
 
 		if readResult.WeeklyUtilization != 0.0 {
 			t.Errorf("WeeklyUtilization should be 0.0 for old cache, got %f", readResult.WeeklyUtilization)
+		}
+	})
+
+	t.Run("save to read-only directory fails", func(t *testing.T) {
+		// 読み取り専用ディレクトリを作成
+		readOnlyDir := filepath.Join(tmpDir, "readonly")
+		if err := os.Mkdir(readOnlyDir, 0555); err != nil {
+			t.Fatalf("failed to create readonly dir: %v", err)
+		}
+		defer os.Chmod(readOnlyDir, 0755) // クリーンアップ時に削除可能にする
+
+		testCache := &CacheData{
+			ResetsAt:    "2026-01-05T10:30:00Z",
+			Utilization: 50.0,
+			CachedAt:    time.Now().Unix(),
+		}
+
+		err := saveCache(filepath.Join(readOnlyDir, "subdir", "cache.json"), testCache)
+		if err == nil {
+			t.Error("saveCache should fail on read-only directory")
+		}
+	})
+
+	t.Run("save to invalid path fails", func(t *testing.T) {
+		testCache := &CacheData{
+			ResetsAt:    "2026-01-05T10:30:00Z",
+			Utilization: 50.0,
+			CachedAt:    time.Now().Unix(),
+		}
+
+		// nullバイトを含む不正なパス
+		err := saveCache("/dev/null/cache.json", testCache)
+		if err == nil {
+			t.Error("saveCache should fail on invalid path")
 		}
 	})
 }
@@ -523,6 +616,678 @@ func BenchmarkFormatResetTime(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		formatResetTime(resetTime)
 	}
+}
+
+func TestRun(t *testing.T) {
+	t.Run("valid input with cache", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+
+		// 有効なキャッシュを作成
+		validCache := &CacheData{
+			ResetsAt:          "2026-01-27T10:00:00Z",
+			Utilization:       45.0,
+			WeeklyUtilization: 20.0,
+			CachedAt:          time.Now().Unix() - 10,
+		}
+		if err := saveCache(cacheFile, validCache); err != nil {
+			t.Fatalf("failed to save cache: %v", err)
+		}
+
+		input := InputData{}
+		input.Model.DisplayName = "Sonnet 4"
+		input.ContextWindow.TotalInputTokens = 1000
+		input.ContextWindow.TotalOutputTokens = 500
+
+		inputJSON, _ := json.Marshal(input)
+		stdin := bytes.NewReader(inputJSON)
+		stdout := &bytes.Buffer{}
+
+		sl := NewStatusLine(
+			WithHistoryModTimeFunc(func() (time.Time, error) {
+				return time.Time{}, os.ErrNotExist
+			}),
+		)
+
+		err := sl.run(stdin, stdout, cacheFile)
+		if err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
+
+		output := stdout.String()
+		if !strings.Contains(output, "Sonnet 4") {
+			t.Errorf("output should contain model name, got: %s", output)
+		}
+		if !strings.Contains(output, "1.5k") {
+			t.Errorf("output should contain total tokens (1.5k), got: %s", output)
+		}
+		if !strings.Contains(output, "45.0%") {
+			t.Errorf("output should contain utilization, got: %s", output)
+		}
+	})
+
+	t.Run("invalid JSON input", func(t *testing.T) {
+		stdin := strings.NewReader("invalid json")
+		stdout := &bytes.Buffer{}
+
+		sl := NewStatusLine()
+		err := sl.run(stdin, stdout, "/tmp/cache.json")
+		if err == nil {
+			t.Error("run should fail on invalid JSON input")
+		}
+	})
+
+	t.Run("output with no reset time", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+
+		// ResetsAtが空のキャッシュ
+		invalidCache := &CacheData{
+			ResetsAt:    "",
+			Utilization: 30.0,
+			CachedAt:    time.Now().Unix() - 10,
+		}
+		if err := saveCache(cacheFile, invalidCache); err != nil {
+			t.Fatalf("failed to save cache: %v", err)
+		}
+
+		input := InputData{}
+		input.Model.DisplayName = "Opus 4"
+		input.ContextWindow.TotalInputTokens = 500
+		input.ContextWindow.TotalOutputTokens = 500
+
+		inputJSON, _ := json.Marshal(input)
+		stdin := bytes.NewReader(inputJSON)
+		stdout := &bytes.Buffer{}
+
+		sl := NewStatusLine(
+			WithHistoryModTimeFunc(func() (time.Time, error) {
+				return time.Time{}, os.ErrNotExist
+			}),
+			WithAccessTokenFunc(func() (string, error) {
+				return "", fmt.Errorf("no token")
+			}),
+		)
+
+		// API呼び出しは失敗するがデフォルト値で継続
+		err := sl.run(stdin, stdout, cacheFile)
+		if err != nil {
+			t.Fatalf("run failed: %v", err)
+		}
+
+		output := stdout.String()
+		if !strings.Contains(output, "N/A") {
+			t.Errorf("output should contain N/A for reset time, got: %s", output)
+		}
+	})
+}
+
+func TestGetCachedOrFetch(t *testing.T) {
+	t.Run("returns valid cache without API call", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+
+		// 有効なキャッシュを作成
+		validCache := &CacheData{
+			ResetsAt:          "2026-01-27T10:00:00Z",
+			Utilization:       30.0,
+			WeeklyUtilization: 15.0,
+			CachedAt:          time.Now().Unix() - 10, // 10秒前
+		}
+		if err := saveCache(cacheFile, validCache); err != nil {
+			t.Fatalf("failed to save cache: %v", err)
+		}
+
+		apiCalled := false
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiCalled = true
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer server.Close()
+
+		sl := NewStatusLine(
+			WithHTTPClient(server.Client()),
+			WithHistoryModTimeFunc(func() (time.Time, error) {
+				return time.Time{}, os.ErrNotExist
+			}),
+		)
+
+		cache, err := sl.getCachedOrFetch(cacheFile, server.URL)
+		if err != nil {
+			t.Fatalf("getCachedOrFetch failed: %v", err)
+		}
+
+		if apiCalled {
+			t.Error("API should not be called when cache is valid")
+		}
+		if cache.Utilization != 30.0 {
+			t.Errorf("Utilization = %f, expected 30.0", cache.Utilization)
+		}
+	})
+
+	t.Run("fetches from API when cache is expired", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+
+		// 期限切れのキャッシュを作成
+		expiredCache := &CacheData{
+			ResetsAt:    "2026-01-27T10:00:00Z",
+			Utilization: 30.0,
+			CachedAt:    time.Now().Unix() - 300, // 5分前（期限切れ）
+		}
+		if err := saveCache(cacheFile, expiredCache); err != nil {
+			t.Fatalf("failed to save cache: %v", err)
+		}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(APIResponse{
+				FiveHour: struct {
+					ResetsAt    string  `json:"resets_at"`
+					Utilization float64 `json:"utilization"`
+				}{
+					ResetsAt:    "2026-01-27T12:00:00Z",
+					Utilization: 50.0,
+				},
+			})
+		}))
+		defer server.Close()
+
+		sl := NewStatusLine(
+			WithHTTPClient(server.Client()),
+			WithAccessTokenFunc(func() (string, error) {
+				return "test-token", nil
+			}),
+			WithHistoryModTimeFunc(func() (time.Time, error) {
+				return time.Time{}, os.ErrNotExist
+			}),
+		)
+
+		cache, err := sl.getCachedOrFetch(cacheFile, server.URL)
+		if err != nil {
+			t.Fatalf("getCachedOrFetch failed: %v", err)
+		}
+
+		if cache.Utilization != 50.0 {
+			t.Errorf("Utilization = %f, expected 50.0 (from API)", cache.Utilization)
+		}
+	})
+
+	t.Run("fetches from API when cache does not exist", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "nonexistent", "cache.json")
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(APIResponse{
+				FiveHour: struct {
+					ResetsAt    string  `json:"resets_at"`
+					Utilization float64 `json:"utilization"`
+				}{
+					ResetsAt:    "2026-01-27T12:00:00Z",
+					Utilization: 60.0,
+				},
+			})
+		}))
+		defer server.Close()
+
+		sl := NewStatusLine(
+			WithHTTPClient(server.Client()),
+			WithAccessTokenFunc(func() (string, error) {
+				return "test-token", nil
+			}),
+			WithHistoryModTimeFunc(func() (time.Time, error) {
+				return time.Time{}, os.ErrNotExist
+			}),
+		)
+
+		cache, err := sl.getCachedOrFetch(cacheFile, server.URL)
+		if err != nil {
+			t.Fatalf("getCachedOrFetch failed: %v", err)
+		}
+
+		if cache.Utilization != 60.0 {
+			t.Errorf("Utilization = %f, expected 60.0", cache.Utilization)
+		}
+	})
+
+	t.Run("returns error when API fails", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer server.Close()
+
+		sl := NewStatusLine(
+			WithHTTPClient(server.Client()),
+			WithAccessTokenFunc(func() (string, error) {
+				return "test-token", nil
+			}),
+			WithHistoryModTimeFunc(func() (time.Time, error) {
+				return time.Time{}, os.ErrNotExist
+			}),
+		)
+
+		_, err := sl.getCachedOrFetch(cacheFile, server.URL)
+		if err == nil {
+			t.Error("getCachedOrFetch should fail when API returns error")
+		}
+	})
+}
+
+func TestGetHistoryModTime(t *testing.T) {
+	t.Run("file exists", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		historyFile := filepath.Join(tmpDir, "history.jsonl")
+
+		// ファイルを作成
+		if err := os.WriteFile(historyFile, []byte("{}"), 0644); err != nil {
+			t.Fatalf("failed to create history file: %v", err)
+		}
+
+		// 特定の時刻を設定
+		expectedTime := time.Date(2026, 1, 27, 10, 30, 0, 0, time.UTC)
+		if err := os.Chtimes(historyFile, expectedTime, expectedTime); err != nil {
+			t.Fatalf("failed to set file time: %v", err)
+		}
+
+		modTime, err := getHistoryModTimeWithPath(historyFile)
+		if err != nil {
+			t.Fatalf("getHistoryModTime failed: %v", err)
+		}
+
+		if !modTime.Equal(expectedTime) {
+			t.Errorf("modTime = %v, expected %v", modTime, expectedTime)
+		}
+	})
+
+	t.Run("file not found", func(t *testing.T) {
+		_, err := getHistoryModTimeWithPath("/nonexistent/path/history.jsonl")
+		if err == nil {
+			t.Error("should fail when file does not exist")
+		}
+	})
+}
+
+func TestGetAccessTokenFromKeychain(t *testing.T) {
+	t.Run("successful keychain response", func(t *testing.T) {
+		sl := NewStatusLine(
+			WithExecCommand(func(name string, arg ...string) *exec.Cmd {
+				// 正常なJSONを返すモックコマンド
+				creds := `{"claudeAiOauth":{"accessToken":"keychain-token"}}`
+				return exec.Command("echo", "-n", creds)
+			}),
+		)
+
+		token, err := sl.getAccessTokenFromKeychain()
+		if err != nil {
+			t.Fatalf("getAccessTokenFromKeychain failed: %v", err)
+		}
+		if token != "keychain-token" {
+			t.Errorf("token = %s, expected keychain-token", token)
+		}
+	})
+
+	t.Run("keychain command fails", func(t *testing.T) {
+		sl := NewStatusLine(
+			WithExecCommand(func(name string, arg ...string) *exec.Cmd {
+				return exec.Command("false") // 常に失敗するコマンド
+			}),
+		)
+
+		_, err := sl.getAccessTokenFromKeychain()
+		if err == nil {
+			t.Error("should fail when keychain command fails")
+		}
+	})
+
+	t.Run("invalid JSON from keychain", func(t *testing.T) {
+		sl := NewStatusLine(
+			WithExecCommand(func(name string, arg ...string) *exec.Cmd {
+				return exec.Command("echo", "-n", "invalid json")
+			}),
+		)
+
+		_, err := sl.getAccessTokenFromKeychain()
+		if err == nil {
+			t.Error("should fail on invalid JSON")
+		}
+	})
+
+	t.Run("empty access token from keychain", func(t *testing.T) {
+		sl := NewStatusLine(
+			WithExecCommand(func(name string, arg ...string) *exec.Cmd {
+				creds := `{"claudeAiOauth":{"accessToken":""}}`
+				return exec.Command("echo", "-n", creds)
+			}),
+		)
+
+		_, err := sl.getAccessTokenFromKeychain()
+		if err == nil {
+			t.Error("should fail on empty access token")
+		}
+	})
+}
+
+func TestGetAccessTokenFromFile(t *testing.T) {
+	t.Run("valid credentials file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		credFile := filepath.Join(tmpDir, ".credentials.json")
+
+		creds := Credentials{}
+		creds.ClaudeAiOauth.AccessToken = "test-access-token"
+
+		data, _ := json.Marshal(creds)
+		if err := os.WriteFile(credFile, data, 0600); err != nil {
+			t.Fatalf("failed to write credentials: %v", err)
+		}
+
+		token, err := getAccessTokenFromFileWithPath(credFile)
+		if err != nil {
+			t.Fatalf("getAccessTokenFromFile failed: %v", err)
+		}
+		if token != "test-access-token" {
+			t.Errorf("token = %s, expected test-access-token", token)
+		}
+	})
+
+	t.Run("file not found", func(t *testing.T) {
+		_, err := getAccessTokenFromFileWithPath("/nonexistent/path/.credentials.json")
+		if err == nil {
+			t.Error("should fail when file does not exist")
+		}
+	})
+
+	t.Run("invalid JSON", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		credFile := filepath.Join(tmpDir, ".credentials.json")
+
+		if err := os.WriteFile(credFile, []byte("invalid json"), 0600); err != nil {
+			t.Fatalf("failed to write file: %v", err)
+		}
+
+		_, err := getAccessTokenFromFileWithPath(credFile)
+		if err == nil {
+			t.Error("should fail on invalid JSON")
+		}
+	})
+
+	t.Run("empty access token", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		credFile := filepath.Join(tmpDir, ".credentials.json")
+
+		creds := Credentials{}
+		creds.ClaudeAiOauth.AccessToken = ""
+
+		data, _ := json.Marshal(creds)
+		if err := os.WriteFile(credFile, data, 0600); err != nil {
+			t.Fatalf("failed to write credentials: %v", err)
+		}
+
+		_, err := getAccessTokenFromFileWithPath(credFile)
+		if err == nil {
+			t.Error("should fail on empty access token")
+		}
+	})
+}
+
+func TestCacheSaveErrorLogging(t *testing.T) {
+	t.Run("logs warning when cache save fails", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(APIResponse{
+				FiveHour: struct {
+					ResetsAt    string  `json:"resets_at"`
+					Utilization float64 `json:"utilization"`
+				}{
+					ResetsAt:    "2026-01-27T10:00:00Z",
+					Utilization: 45.0,
+				},
+			})
+		}))
+		defer server.Close()
+
+		stderr := &bytes.Buffer{}
+
+		sl := NewStatusLine(
+			WithHTTPClient(server.Client()),
+			WithAccessTokenFunc(func() (string, error) {
+				return "test-token", nil
+			}),
+			WithStderr(stderr),
+		)
+
+		// 書き込み不可能なパスを指定
+		_, err := sl.fetchFromAPI("/dev/null/impossible/cache.json", server.URL)
+		if err != nil {
+			t.Fatalf("fetchFromAPI failed: %v", err)
+		}
+
+		// stderrに警告が出力されていることを確認
+		if !strings.Contains(stderr.String(), "warning") {
+			t.Errorf("stderr should contain warning, got: %s", stderr.String())
+		}
+	})
+}
+
+func TestFetchFromAPI(t *testing.T) {
+	t.Run("successful API response", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// ヘッダー検証
+			if r.Header.Get("Authorization") != "Bearer test-token" {
+				t.Errorf("unexpected Authorization header: %s", r.Header.Get("Authorization"))
+			}
+			if r.Header.Get("anthropic-beta") == "" {
+				t.Error("anthropic-beta header should be set")
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(APIResponse{
+				FiveHour: struct {
+					ResetsAt    string  `json:"resets_at"`
+					Utilization float64 `json:"utilization"`
+				}{
+					ResetsAt:    "2026-01-27T10:00:00Z",
+					Utilization: 45.5,
+				},
+				SevenDay: struct {
+					ResetsAt    string  `json:"resets_at"`
+					Utilization float64 `json:"utilization"`
+				}{
+					ResetsAt:    "2026-01-30T10:00:00Z",
+					Utilization: 22.0,
+				},
+			})
+		}))
+		defer server.Close()
+
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+
+		sl := NewStatusLine(
+			WithHTTPClient(server.Client()),
+			WithAccessTokenFunc(func() (string, error) {
+				return "test-token", nil
+			}),
+		)
+
+		cache, err := sl.fetchFromAPI(cacheFile, server.URL)
+		if err != nil {
+			t.Fatalf("fetchFromAPI failed: %v", err)
+		}
+
+		if cache.ResetsAt != "2026-01-27T10:00:00Z" {
+			t.Errorf("ResetsAt = %s, expected 2026-01-27T10:00:00Z", cache.ResetsAt)
+		}
+		if cache.Utilization != 45.5 {
+			t.Errorf("Utilization = %f, expected 45.5", cache.Utilization)
+		}
+		if cache.WeeklyUtilization != 22.0 {
+			t.Errorf("WeeklyUtilization = %f, expected 22.0", cache.WeeklyUtilization)
+		}
+	})
+
+	t.Run("HTTP error response", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer server.Close()
+
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+
+		sl := NewStatusLine(
+			WithHTTPClient(server.Client()),
+			WithAccessTokenFunc(func() (string, error) {
+				return "test-token", nil
+			}),
+		)
+
+		_, err := sl.fetchFromAPI(cacheFile, server.URL)
+		if err == nil {
+			t.Error("fetchFromAPI should fail on HTTP 500")
+		}
+	})
+
+	t.Run("invalid JSON response", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte("invalid json"))
+		}))
+		defer server.Close()
+
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+
+		sl := NewStatusLine(
+			WithHTTPClient(server.Client()),
+			WithAccessTokenFunc(func() (string, error) {
+				return "test-token", nil
+			}),
+		)
+
+		_, err := sl.fetchFromAPI(cacheFile, server.URL)
+		if err == nil {
+			t.Error("fetchFromAPI should fail on invalid JSON")
+		}
+	})
+
+	t.Run("empty ResetsAt in response", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(APIResponse{
+				FiveHour: struct {
+					ResetsAt    string  `json:"resets_at"`
+					Utilization float64 `json:"utilization"`
+				}{
+					ResetsAt:    "",
+					Utilization: 45.5,
+				},
+			})
+		}))
+		defer server.Close()
+
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+
+		sl := NewStatusLine(
+			WithHTTPClient(server.Client()),
+			WithAccessTokenFunc(func() (string, error) {
+				return "test-token", nil
+			}),
+		)
+
+		_, err := sl.fetchFromAPI(cacheFile, server.URL)
+		if err == nil {
+			t.Error("fetchFromAPI should fail on empty ResetsAt")
+		}
+	})
+
+	t.Run("access token error", func(t *testing.T) {
+		sl := NewStatusLine(
+			WithAccessTokenFunc(func() (string, error) {
+				return "", fmt.Errorf("token error")
+			}),
+		)
+
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+
+		_, err := sl.fetchFromAPI(cacheFile, "http://example.com")
+		if err == nil {
+			t.Error("fetchFromAPI should fail on token error")
+		}
+	})
+}
+
+func TestNewStatusLine(t *testing.T) {
+	t.Run("default StatusLine has valid dependencies", func(t *testing.T) {
+		sl := NewStatusLine()
+		if sl == nil {
+			t.Fatal("NewStatusLine() returned nil")
+		}
+		if sl.httpClient == nil {
+			t.Error("httpClient should not be nil")
+		}
+		if sl.getHistoryModTime == nil {
+			t.Error("getHistoryModTime should not be nil")
+		}
+		if sl.getAccessToken == nil {
+			t.Error("getAccessToken should not be nil")
+		}
+	})
+
+	t.Run("StatusLine with custom dependencies", func(t *testing.T) {
+		customCalled := false
+		sl := NewStatusLine(
+			WithHistoryModTimeFunc(func() (time.Time, error) {
+				customCalled = true
+				return time.Now(), nil
+			}),
+		)
+
+		_, _ = sl.getHistoryModTime()
+		if !customCalled {
+			t.Error("custom getHistoryModTime was not called")
+		}
+	})
+}
+
+func TestColorizeUsageWarnings(t *testing.T) {
+	t.Run("logs warning for negative usage", func(t *testing.T) {
+		stderr := &bytes.Buffer{}
+		sl := NewStatusLine(WithStderr(stderr))
+
+		_ = sl.colorizeUsage(-5.0)
+
+		if !strings.Contains(stderr.String(), "warning") {
+			t.Errorf("stderr should contain warning for negative usage, got: %s", stderr.String())
+		}
+	})
+
+	t.Run("logs warning for usage over 100", func(t *testing.T) {
+		stderr := &bytes.Buffer{}
+		sl := NewStatusLine(WithStderr(stderr))
+
+		_ = sl.colorizeUsage(105.0)
+
+		if !strings.Contains(stderr.String(), "warning") {
+			t.Errorf("stderr should contain warning for usage > 100, got: %s", stderr.String())
+		}
+	})
+
+	t.Run("no warning for normal usage", func(t *testing.T) {
+		stderr := &bytes.Buffer{}
+		sl := NewStatusLine(WithStderr(stderr))
+
+		_ = sl.colorizeUsage(50.0)
+
+		if stderr.Len() > 0 {
+			t.Errorf("stderr should be empty for normal usage, got: %s", stderr.String())
+		}
+	})
 }
 
 func TestColorizeUsage(t *testing.T) {
