@@ -24,6 +24,22 @@ const (
 	colorYellow = "\033[33m"
 	colorOrange = "\033[38;5;208m"
 	colorRed    = "\033[31m"
+
+	// プログレスバー設定
+	barWidth = 20 // プログレスバーの幅（文字数）
+
+	// 使用率の色閾値（%）
+	usageThresholdYellow = 25
+	usageThresholdOrange = 50
+	usageThresholdRed    = 75
+
+	// 部分ブロック閾値（6段階）
+	shadeSteps      = 6
+	shadeThreshold5 = 5.0 / shadeSteps // ▇
+	shadeThreshold4 = 4.0 / shadeSteps // ▆
+	shadeThreshold3 = 3.0 / shadeSteps // ▅
+	shadeThreshold2 = 2.0 / shadeSteps // ▃
+	shadeThreshold1 = 1.0 / shadeSteps // ▂
 )
 
 // getHistoryModTimeFunc は history.jsonl の更新時刻を取得する関数（テスト用に差し替え可能）
@@ -215,15 +231,13 @@ func (sl *StatusLine) colorizeUsage(usage float64) string {
 
 // colorizeUsageInternal は使用率に応じて色付けした文字列とプログレスバーを返す（内部実装）
 func colorizeUsageInternal(usage float64) string {
-	const barWidth = 20
-
 	var color string
 	switch {
-	case usage < 25:
+	case usage < usageThresholdYellow:
 		color = colorGreen
-	case usage < 50:
+	case usage < usageThresholdOrange:
 		color = colorYellow
-	case usage < 75:
+	case usage < usageThresholdRed:
 		color = colorOrange
 	default:
 		color = colorRed
@@ -248,19 +262,19 @@ func colorizeUsageInternal(usage float64) string {
 	if filled < barWidth {
 		fraction := totalBlocks - float64(filled)
 		switch {
-		case fraction >= 5.0/6.0:
+		case fraction >= shadeThreshold5:
 			shade = "▇"
 			shadeWidth = 1
-		case fraction >= 4.0/6.0:
+		case fraction >= shadeThreshold4:
 			shade = "▆"
 			shadeWidth = 1
-		case fraction >= 3.0/6.0:
+		case fraction >= shadeThreshold3:
 			shade = "▅"
 			shadeWidth = 1
-		case fraction >= 2.0/6.0:
+		case fraction >= shadeThreshold2:
 			shade = "▃"
 			shadeWidth = 1
-		case fraction >= 1.0/6.0:
+		case fraction >= shadeThreshold1:
 			shade = "▂"
 			shadeWidth = 1
 		case fraction > 0:
