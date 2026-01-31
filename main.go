@@ -42,10 +42,6 @@ const (
 	shadeThreshold1 = 1.0 / shadeSteps // ▂
 )
 
-// getHistoryModTimeFunc は history.jsonl の更新時刻を取得する関数（テスト用に差し替え可能）
-// Deprecated: StatusLine構造体の依存性注入を使用してください
-var getHistoryModTimeFunc = getHistoryModTime
-
 // StatusLine はステータスライン生成の依存性を管理する構造体
 type StatusLine struct {
 	httpClient        *http.Client
@@ -290,12 +286,6 @@ func colorizeUsageInternal(usage float64) string {
 }
 
 // isCacheValid はキャッシュが有効かどうかをチェック
-func isCacheValid(cache *CacheData) bool {
-	sl := &StatusLine{getHistoryModTime: getHistoryModTimeFunc}
-	return sl.isCacheValid(cache)
-}
-
-// isCacheValid はキャッシュが有効かどうかをチェック（StatusLineメソッド版）
 func (sl *StatusLine) isCacheValid(cache *CacheData) bool {
 	if cache.CachedAt == 0 {
 		return false

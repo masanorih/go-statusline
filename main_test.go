@@ -39,12 +39,12 @@ func TestFormatTokens(t *testing.T) {
 }
 
 func TestIsCacheValid(t *testing.T) {
-	// history.jsonl の影響を排除（history連携は TestIsCacheValidWithHistoryCheck でテスト）
-	originalFunc := getHistoryModTimeFunc
-	defer func() { getHistoryModTimeFunc = originalFunc }()
-	getHistoryModTimeFunc = func() (time.Time, error) {
-		return time.Time{}, os.ErrNotExist
-	}
+	// history.jsonl の影響を排除するため、常にエラーを返すモック関数を使用
+	sl := NewStatusLine(
+		WithHistoryModTimeFunc(func() (time.Time, error) {
+			return time.Time{}, os.ErrNotExist
+		}),
+	)
 
 	tests := []struct {
 		name     string
@@ -80,7 +80,7 @@ func TestIsCacheValid(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := isCacheValid(tt.cache)
+			result := sl.isCacheValid(tt.cache)
 			if result != tt.expected {
 				t.Errorf("isCacheValid() = %v, expected %v", result, tt.expected)
 			}
@@ -89,22 +89,20 @@ func TestIsCacheValid(t *testing.T) {
 }
 
 func TestIsCacheValidWithHistoryCheck(t *testing.T) {
-	// テスト後に元の関数を復元
-	originalFunc := getHistoryModTimeFunc
-	defer func() { getHistoryModTimeFunc = originalFunc }()
-
 	t.Run("within minFetchInterval (10 seconds) - always valid", func(t *testing.T) {
 		// history.jsonl が更新されていても、minFetchInterval 以内なら有効
-		getHistoryModTimeFunc = func() (time.Time, error) {
-			return time.Now(), nil // 今更新された
-		}
+		sl := NewStatusLine(
+			WithHistoryModTimeFunc(func() (time.Time, error) {
+				return time.Now(), nil // 今更新された
+			}),
+		)
 
 		cache := &CacheData{
 			CachedAt: time.Now().Unix() - 10, // 10秒前
 			ResetsAt: "2026-01-06T10:00:00Z",
 		}
 
-		if !isCacheValid(cache) {
+		if !sl.isCacheValid(cache) {
 			t.Error("cache should be valid within minFetchInterval even if history was updated")
 		}
 	})
@@ -112,16 +110,18 @@ func TestIsCacheValidWithHistoryCheck(t *testing.T) {
 	t.Run("between minFetchInterval and pollInterval with history update - invalid", func(t *testing.T) {
 		cacheTime := time.Now().Add(-60 * time.Second) // 60秒前
 
-		getHistoryModTimeFunc = func() (time.Time, error) {
-			return time.Now(), nil // history.jsonl は今更新された
-		}
+		sl := NewStatusLine(
+			WithHistoryModTimeFunc(func() (time.Time, error) {
+				return time.Now(), nil // history.jsonl は今更新された
+			}),
+		)
 
 		cache := &CacheData{
 			CachedAt: cacheTime.Unix(),
 			ResetsAt: "2026-01-06T10:00:00Z",
 		}
 
-		if isCacheValid(cache) {
+		if sl.isCacheValid(cache) {
 			t.Error("cache should be invalid when history.jsonl is newer than cache")
 		}
 	})
@@ -129,46 +129,52 @@ func TestIsCacheValidWithHistoryCheck(t *testing.T) {
 	t.Run("between minFetchInterval and pollInterval without history update - valid", func(t *testing.T) {
 		cacheTime := time.Now().Add(-60 * time.Second) // 60秒前
 
-		getHistoryModTimeFunc = func() (time.Time, error) {
-			return cacheTime.Add(-10 * time.Second), nil // history.jsonl はキャッシュより古い
-		}
+		sl := NewStatusLine(
+			WithHistoryModTimeFunc(func() (time.Time, error) {
+				return cacheTime.Add(-10 * time.Second), nil // history.jsonl はキャッシュより古い
+			}),
+		)
 
 		cache := &CacheData{
 			CachedAt: cacheTime.Unix(),
 			ResetsAt: "2026-01-06T10:00:00Z",
 		}
 
-		if !isCacheValid(cache) {
+		if !sl.isCacheValid(cache) {
 			t.Error("cache should be valid when history.jsonl is older than cache")
 		}
 	})
 
 	t.Run("beyond pollInterval - always invalid", func(t *testing.T) {
-		getHistoryModTimeFunc = func() (time.Time, error) {
-			return time.Now().Add(-1 * time.Hour), nil // history.jsonl は古い
-		}
+		sl := NewStatusLine(
+			WithHistoryModTimeFunc(func() (time.Time, error) {
+				return time.Now().Add(-1 * time.Hour), nil // history.jsonl は古い
+			}),
+		)
 
 		cache := &CacheData{
 			CachedAt: time.Now().Unix() - 180, // 3分前（pollInterval超過）
 			ResetsAt: "2026-01-06T10:00:00Z",
 		}
 
-		if isCacheValid(cache) {
+		if sl.isCacheValid(cache) {
 			t.Error("cache should be invalid when beyond pollInterval")
 		}
 	})
 
 	t.Run("history.jsonl not found - fallback to time-based", func(t *testing.T) {
-		getHistoryModTimeFunc = func() (time.Time, error) {
-			return time.Time{}, os.ErrNotExist
-		}
+		sl := NewStatusLine(
+			WithHistoryModTimeFunc(func() (time.Time, error) {
+				return time.Time{}, os.ErrNotExist
+			}),
+		)
 
 		cache := &CacheData{
 			CachedAt: time.Now().Unix() - 60, // 60秒前（pollInterval以内）
 			ResetsAt: "2026-01-06T10:00:00Z",
 		}
 
-		if !isCacheValid(cache) {
+		if !sl.isCacheValid(cache) {
 			t.Error("cache should be valid when history.jsonl doesn't exist and within pollInterval")
 		}
 	})
@@ -571,6 +577,13 @@ func TestAPIResponseParsing(t *testing.T) {
 }
 
 func TestCacheDataValidation(t *testing.T) {
+	// history.jsonl の影響を排除
+	sl := NewStatusLine(
+		WithHistoryModTimeFunc(func() (time.Time, error) {
+			return time.Time{}, os.ErrNotExist
+		}),
+	)
+
 	t.Run("valid cache data", func(t *testing.T) {
 		cache := &CacheData{
 			ResetsAt:    "2026-01-05T10:30:00Z",
@@ -578,7 +591,7 @@ func TestCacheDataValidation(t *testing.T) {
 			CachedAt:    time.Now().Unix(),
 		}
 
-		if !isCacheValid(cache) {
+		if !sl.isCacheValid(cache) {
 			t.Error("cache should be valid")
 		}
 	})
@@ -591,7 +604,7 @@ func TestCacheDataValidation(t *testing.T) {
 		}
 
 		// Should still work (time is monotonic)
-		if !isCacheValid(cache) {
+		if !sl.isCacheValid(cache) {
 			t.Error("cache with future timestamp should be valid")
 		}
 	})
@@ -605,9 +618,14 @@ func BenchmarkFormatTokens(b *testing.B) {
 }
 
 func BenchmarkIsCacheValid(b *testing.B) {
-	cache := &CacheData{CachedAt: time.Now().Unix() - 300}
+	sl := NewStatusLine(
+		WithHistoryModTimeFunc(func() (time.Time, error) {
+			return time.Time{}, os.ErrNotExist
+		}),
+	)
+	cache := &CacheData{CachedAt: time.Now().Unix() - 300, ResetsAt: "2026-01-06T10:00:00Z"}
 	for i := 0; i < b.N; i++ {
-		isCacheValid(cache)
+		sl.isCacheValid(cache)
 	}
 }
 
