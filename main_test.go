@@ -275,6 +275,58 @@ func TestFormatResetTime(t *testing.T) {
 	}
 }
 
+func TestFormatResetTimeWithDate(t *testing.T) {
+	tests := []struct {
+		name     string
+		resetsAt string
+		wantEmpty bool
+	}{
+		{
+			name:      "empty string",
+			resetsAt:  "",
+			wantEmpty: true,
+		},
+		{
+			name:      "invalid format",
+			resetsAt:  "invalid-time",
+			wantEmpty: true,
+		},
+		{
+			name:      "valid ISO8601",
+			resetsAt:  "2026-02-05T10:30:00Z",
+			wantEmpty: false,
+		},
+		{
+			name:      "with timezone offset",
+			resetsAt:  "2026-02-05T10:30:00+00:00",
+			wantEmpty: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatResetTimeWithDate(tt.resetsAt)
+			if tt.wantEmpty && result != "" {
+				t.Errorf("formatResetTimeWithDate(%s) = %s, expected empty", tt.resetsAt, result)
+			}
+			if !tt.wantEmpty && result == "" {
+				t.Errorf("formatResetTimeWithDate(%s) returned empty, expected non-empty", tt.resetsAt)
+			}
+			// フォーマット形式のチェック: MM/DD HH:MM (例: 02/05 19:30)
+			if !tt.wantEmpty && result != "" {
+				// 長さは 11 文字 (MM/DD HH:MM)
+				if len(result) != 11 {
+					t.Errorf("formatResetTimeWithDate(%s) = %s, expected format MM/DD HH:MM (length 11)", tt.resetsAt, result)
+				}
+				// スラッシュとスペースの位置をチェック
+				if result[2] != '/' || result[5] != ' ' || result[8] != ':' {
+					t.Errorf("formatResetTimeWithDate(%s) = %s, expected format MM/DD HH:MM", tt.resetsAt, result)
+				}
+			}
+		})
+	}
+}
+
 func TestCacheOperations(t *testing.T) {
 	// Create temporary directory for test
 	tmpDir := t.TempDir()

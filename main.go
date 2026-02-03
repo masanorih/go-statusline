@@ -119,10 +119,11 @@ type InputData struct {
 
 // CacheData はキャッシュされる使用状況データ
 type CacheData struct {
-	ResetsAt          string  `json:"resets_at"`          // リセット時刻（ISO8601形式）
-	Utilization       float64 `json:"utilization"`        // 5時間使用率（0-100）
-	WeeklyUtilization float64 `json:"weekly_utilization"` // 週間使用率（0-100）
-	CachedAt          int64   `json:"cached_at"`          // キャッシュ作成時刻（Unix時刻）
+	ResetsAt          string  `json:"resets_at"`           // 5時間リセット時刻（ISO8601形式）
+	Utilization       float64 `json:"utilization"`         // 5時間使用率（0-100）
+	WeeklyUtilization float64 `json:"weekly_utilization"`  // 週間使用率（0-100）
+	WeeklyResetsAt    string  `json:"weekly_resets_at"`    // 週間リセット時刻（ISO8601形式）
+	CachedAt          int64   `json:"cached_at"`           // キャッシュ作成時刻（Unix時刻）
 }
 
 // Credentials は OAuth 認証情報
@@ -183,6 +184,7 @@ func (sl *StatusLine) run(stdin io.Reader, stdout io.Writer, cacheFile string) e
 
 	// リセット時刻をフォーマット
 	resetTime := formatResetTime(cache.ResetsAt)
+	weeklyResetTime := formatResetTimeWithDate(cache.WeeklyResetsAt)
 
 	// 使用率をフォーマット（色付き）
 	fiveHourUsage := sl.colorizeUsage(cache.Utilization)
@@ -190,11 +192,21 @@ func (sl *StatusLine) run(stdin io.Reader, stdout io.Writer, cacheFile string) e
 
 	// ステータスラインを出力
 	if resetTime != "" {
-		fmt.Fprintf(stdout, "go-statusline | Model: %s | Total Tokens: %s | 5h: %s | resets: %s | week: %s\n",
-			input.Model.DisplayName, totalTokensStr, fiveHourUsage, resetTime, weeklyUsage)
+		if weeklyResetTime != "" {
+			fmt.Fprintf(stdout, "go-statusline | Model: %s | Total Tokens: %s | 5h: %s | resets: %s | week: %s | resets: %s\n",
+				input.Model.DisplayName, totalTokensStr, fiveHourUsage, resetTime, weeklyUsage, weeklyResetTime)
+		} else {
+			fmt.Fprintf(stdout, "go-statusline | Model: %s | Total Tokens: %s | 5h: %s | resets: %s | week: %s | resets: N/A\n",
+				input.Model.DisplayName, totalTokensStr, fiveHourUsage, resetTime, weeklyUsage)
+		}
 	} else {
-		fmt.Fprintf(stdout, "go-statusline | Model: %s | Total Tokens: %s | 5h: %s | resets: N/A | week: %s\n",
-			input.Model.DisplayName, totalTokensStr, fiveHourUsage, weeklyUsage)
+		if weeklyResetTime != "" {
+			fmt.Fprintf(stdout, "go-statusline | Model: %s | Total Tokens: %s | 5h: %s | resets: N/A | week: %s | resets: %s\n",
+				input.Model.DisplayName, totalTokensStr, fiveHourUsage, weeklyUsage, weeklyResetTime)
+		} else {
+			fmt.Fprintf(stdout, "go-statusline | Model: %s | Total Tokens: %s | 5h: %s | resets: N/A | week: %s | resets: N/A\n",
+				input.Model.DisplayName, totalTokensStr, fiveHourUsage, weeklyUsage)
+		}
 	}
 
 	return nil
@@ -407,6 +419,7 @@ func (sl *StatusLine) fetchFromAPI(cacheFile string, endpoint string) (*CacheDat
 		ResetsAt:          apiResp.FiveHour.ResetsAt,
 		Utilization:       apiResp.FiveHour.Utilization,
 		WeeklyUtilization: apiResp.SevenDay.Utilization,
+		WeeklyResetsAt:    apiResp.SevenDay.ResetsAt,
 		CachedAt:          time.Now().Unix(),
 	}
 
@@ -570,4 +583,24 @@ func formatResetTime(resetsAt string) string {
 	// ローカル時刻に変換してフォーマット
 	localTime := t.Local()
 	return localTime.Format("15:04")
+}
+
+// formatResetTimeWithDate はリセット時刻をMM/DD HH:MM形式にフォーマット
+func formatResetTimeWithDate(resetsAt string) string {
+	if resetsAt == "" {
+		return ""
+	}
+
+	// ISO8601時刻をパース
+	t, err := time.Parse(time.RFC3339, resetsAt)
+	if err != nil {
+		return ""
+	}
+
+	// 分単位で切り上げ
+	t = roundUpToMinute(t)
+
+	// ローカル時刻に変換してフォーマット（MM/DD HH:MM）
+	localTime := t.Local()
+	return localTime.Format("01/02 15:04")
 }
