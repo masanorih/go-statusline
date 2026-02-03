@@ -180,59 +180,6 @@ func TestIsCacheValidWithHistoryCheck(t *testing.T) {
 	})
 }
 
-func TestRoundUpToMinute(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    time.Time
-		expected time.Time
-	}{
-		{
-			name:     "exact minute (no seconds)",
-			input:    time.Date(2026, 1, 5, 10, 30, 0, 0, time.UTC),
-			expected: time.Date(2026, 1, 5, 10, 30, 0, 0, time.UTC),
-		},
-		{
-			name:     "1 second after minute",
-			input:    time.Date(2026, 1, 5, 10, 30, 1, 0, time.UTC),
-			expected: time.Date(2026, 1, 5, 10, 31, 0, 0, time.UTC),
-		},
-		{
-			name:     "30 seconds after minute",
-			input:    time.Date(2026, 1, 5, 10, 30, 30, 0, time.UTC),
-			expected: time.Date(2026, 1, 5, 10, 31, 0, 0, time.UTC),
-		},
-		{
-			name:     "59 seconds after minute",
-			input:    time.Date(2026, 1, 5, 10, 30, 59, 0, time.UTC),
-			expected: time.Date(2026, 1, 5, 10, 31, 0, 0, time.UTC),
-		},
-		{
-			name:     "nanoseconds only",
-			input:    time.Date(2026, 1, 5, 10, 30, 0, 1, time.UTC),
-			expected: time.Date(2026, 1, 5, 10, 31, 0, 0, time.UTC),
-		},
-		{
-			name:     "end of hour",
-			input:    time.Date(2026, 1, 5, 10, 59, 30, 0, time.UTC),
-			expected: time.Date(2026, 1, 5, 11, 0, 0, 0, time.UTC),
-		},
-		{
-			name:     "end of day",
-			input:    time.Date(2026, 1, 5, 23, 59, 30, 0, time.UTC),
-			expected: time.Date(2026, 1, 6, 0, 0, 0, 0, time.UTC),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := roundUpToMinute(tt.input)
-			if !result.Equal(tt.expected) {
-				t.Errorf("roundUpToMinute(%v) = %v, expected %v", tt.input, result, tt.expected)
-			}
-		})
-	}
-}
-
 func TestFormatResetTime(t *testing.T) {
 	tests := []struct {
 		name     string

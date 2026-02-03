@@ -555,16 +555,6 @@ func getHistoryModTimeWithPath(historyFile string) (time.Time, error) {
 	return info.ModTime(), nil
 }
 
-// roundUpToMinute は時刻を分単位で切り上げる
-// 秒数やナノ秒がある場合は次の分に切り上げ、ちょうどの分ならそのまま
-func roundUpToMinute(t time.Time) time.Time {
-	truncated := t.Truncate(time.Minute)
-	if t.After(truncated) {
-		return truncated.Add(time.Minute)
-	}
-	return truncated
-}
-
 // formatResetTime はリセット時刻をHH:MM形式にフォーマット
 func formatResetTime(resetsAt string) string {
 	if resetsAt == "" {
@@ -576,9 +566,6 @@ func formatResetTime(resetsAt string) string {
 	if err != nil {
 		return ""
 	}
-
-	// 分単位で切り上げ
-	t = roundUpToMinute(t)
 
 	// ローカル時刻に変換してフォーマット
 	localTime := t.Local()
@@ -596,9 +583,6 @@ func formatResetTimeWithDate(resetsAt string) string {
 	if err != nil {
 		return ""
 	}
-
-	// 分単位で切り上げ
-	t = roundUpToMinute(t)
 
 	// ローカル時刻に変換してフォーマット（MM/DD HH:MM）
 	localTime := t.Local()
