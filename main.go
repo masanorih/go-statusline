@@ -126,11 +126,16 @@ func loadConfig() (*Config, error) {
 }
 
 // loadConfigFromPath は指定されたパスから設定ファイルを読み込む
+// ファイルが存在しない場合はデフォルト設定でファイルを作成する
 func loadConfigFromPath(configPath string) (*Config, error) {
 	cfg := defaultConfig()
 
-	// ファイルが存在しない場合はデフォルト設定を返す
+	// ファイルが存在しない場合はデフォルト設定ファイルを作成
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		if err := saveConfig(configPath, cfg); err != nil {
+			// ファイル作成に失敗してもデフォルト設定は返す
+			return cfg, nil
+		}
 		return cfg, nil
 	}
 
@@ -146,6 +151,24 @@ func loadConfigFromPath(configPath string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// saveConfig は設定をファイルに保存する
+func saveConfig(configPath string, cfg *Config) error {
+	// ディレクトリを作成
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		return err
+	}
+
+	file, err := os.Create(configPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(cfg)
 }
 
 // StatusLine はステータスライン生成の依存性を管理する構造体

@@ -1438,9 +1438,9 @@ func TestDefaultConfig(t *testing.T) {
 }
 
 func TestLoadConfig(t *testing.T) {
-	t.Run("returns default config when file does not exist", func(t *testing.T) {
+	t.Run("creates default config file when file does not exist", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		configPath := filepath.Join(tmpDir, "config.json")
+		configPath := filepath.Join(tmpDir, "subdir", "config.json")
 
 		cfg, err := loadConfigFromPath(configPath)
 		if err != nil {
@@ -1453,6 +1453,48 @@ func TestLoadConfig(t *testing.T) {
 		}
 		if cfg.BarWidth != 20 {
 			t.Errorf("BarWidth should be 20, got %d", cfg.BarWidth)
+		}
+
+		// ファイルが作成されていることを確認
+		if _, err := os.Stat(configPath); os.IsNotExist(err) {
+			t.Error("config file should be created")
+		}
+
+		// 作成されたファイルの内容を確認
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatalf("failed to read created config file: %v", err)
+		}
+
+		var createdCfg Config
+		if err := json.Unmarshal(data, &createdCfg); err != nil {
+			t.Fatalf("failed to parse created config file: %v", err)
+		}
+
+		// デフォルト値で作成されていることを確認
+		if !createdCfg.ShowAppName {
+			t.Error("created config: ShowAppName should be true")
+		}
+		if !createdCfg.ShowModel {
+			t.Error("created config: ShowModel should be true")
+		}
+		if !createdCfg.ShowTokens {
+			t.Error("created config: ShowTokens should be true")
+		}
+		if !createdCfg.Show5hUsage {
+			t.Error("created config: Show5hUsage should be true")
+		}
+		if !createdCfg.Show5hResets {
+			t.Error("created config: Show5hResets should be true")
+		}
+		if !createdCfg.ShowWeekUsage {
+			t.Error("created config: ShowWeekUsage should be true")
+		}
+		if !createdCfg.ShowWeekResets {
+			t.Error("created config: ShowWeekResets should be true")
+		}
+		if createdCfg.BarWidth != 20 {
+			t.Errorf("created config: BarWidth should be 20, got %d", createdCfg.BarWidth)
 		}
 	})
 
