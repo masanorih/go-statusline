@@ -49,9 +49,7 @@ chmod +x ~/.claude/statusline
 
 Claude Code を起動すると、ステータスラインに以下のような情報が表示されます：
 
-```
-go-statusline | Model: Sonnet 4.5 | Total Tokens: 200.0k | 5h: 34.0% [██████▆             ] | resets: 14:00 | week: 22.0% [████▃               ] | resets: 02/05 14:00
-```
+![screenshot](screenshot.png)
 
 5h, week はプログレスバー付きで表示され、使用率に応じて色が変化します：
 - 0-24%: 緑
