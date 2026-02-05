@@ -40,7 +40,113 @@ const (
 	shadeThreshold3 = 3.0 / shadeSteps // ▅
 	shadeThreshold2 = 2.0 / shadeSteps // ▃
 	shadeThreshold1 = 1.0 / shadeSteps // ▂
+
+	// アプリケーション名
+	appName = "go-statusline"
 )
+
+// getConfigDir は設定ディレクトリのパスを返す
+// XDG Base Directory Specification に準拠
+func getConfigDir() string {
+	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
+		return filepath.Join(xdgConfig, appName)
+	}
+	homeDir, _ := os.UserHomeDir()
+	return filepath.Join(homeDir, ".config", appName)
+}
+
+// getCacheFilePath はキャッシュファイルのパスを返す
+func getCacheFilePath() string {
+	return filepath.Join(getConfigDir(), "cache.json")
+}
+
+// getLegacyCacheFilePath は旧キャッシュファイルのパスを返す
+func getLegacyCacheFilePath() string {
+	homeDir, _ := os.UserHomeDir()
+	return filepath.Join(homeDir, ".claude", ".usage_cache.json")
+}
+
+// migrateLegacyCache は旧キャッシュファイルを新しい場所に移行する
+// 旧ファイルが存在し、新ファイルが存在しない場合のみ移行を実行
+// 移行後は旧ファイルを削除する
+func migrateLegacyCache(legacyPath, newPath string) error {
+	// 旧ファイルが存在しない場合は何もしない
+	if _, err := os.Stat(legacyPath); os.IsNotExist(err) {
+		return nil
+	}
+
+	// 新ファイルが既に存在する場合は何もしない
+	if _, err := os.Stat(newPath); err == nil {
+		return nil
+	}
+
+	// ディレクトリを作成
+	if err := os.MkdirAll(filepath.Dir(newPath), 0755); err != nil {
+		return err
+	}
+
+	// ファイルを移動
+	if err := os.Rename(legacyPath, newPath); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Config は表示設定を保持する構造体
+type Config struct {
+	ShowAppName    bool `json:"show_app_name"`
+	ShowModel      bool `json:"show_model"`
+	ShowTokens     bool `json:"show_tokens"`
+	Show5hUsage    bool `json:"show_5h_usage"`
+	Show5hResets   bool `json:"show_5h_resets"`
+	ShowWeekUsage  bool `json:"show_week_usage"`
+	ShowWeekResets bool `json:"show_week_resets"`
+	BarWidth       int  `json:"bar_width"`
+}
+
+// defaultConfig はデフォルト設定を返す
+func defaultConfig() *Config {
+	return &Config{
+		ShowAppName:    true,
+		ShowModel:      true,
+		ShowTokens:     true,
+		Show5hUsage:    true,
+		Show5hResets:   true,
+		ShowWeekUsage:  true,
+		ShowWeekResets: true,
+		BarWidth:       20,
+	}
+}
+
+// loadConfig は設定ファイルを読み込む
+func loadConfig() (*Config, error) {
+	configPath := filepath.Join(getConfigDir(), "config.json")
+	return loadConfigFromPath(configPath)
+}
+
+// loadConfigFromPath は指定されたパスから設定ファイルを読み込む
+func loadConfigFromPath(configPath string) (*Config, error) {
+	cfg := defaultConfig()
+
+	// ファイルが存在しない場合はデフォルト設定を返す
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		return cfg, nil
+	}
+
+	file, err := os.Open(configPath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	// デフォルト値の上にJSONをマージ
+	if err := json.NewDecoder(file).Decode(cfg); err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
+}
 
 // StatusLine はステータスライン生成の依存性を管理する構造体
 type StatusLine struct {
@@ -156,6 +262,18 @@ func main() {
 // run はメインロジックを実行（テスト可能）
 // cacheFileが空の場合はデフォルトパスを使用
 func (sl *StatusLine) run(stdin io.Reader, stdout io.Writer, cacheFile string) error {
+	// 設定ファイルを読み込む
+	cfg, err := loadConfig()
+	if err != nil {
+		fmt.Fprintf(sl.stderr, "warning: failed to load config: %v\n", err)
+		cfg = defaultConfig()
+	}
+
+	return sl.runWithConfig(stdin, stdout, cacheFile, cfg)
+}
+
+// runWithConfig は指定された設定でメインロジックを実行（テスト用）
+func (sl *StatusLine) runWithConfig(stdin io.Reader, stdout io.Writer, cacheFile string, cfg *Config) error {
 	// 標準入力からJSONを読み込む
 	var input InputData
 	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
@@ -168,11 +286,13 @@ func (sl *StatusLine) run(stdin io.Reader, stdout io.Writer, cacheFile string) e
 
 	// キャッシュファイルのパスを取得
 	if cacheFile == "" {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("failed to get home directory: %w", err)
+		cacheFile = getCacheFilePath()
+
+		// 旧キャッシュファイルからの移行
+		legacyPath := getLegacyCacheFilePath()
+		if err := migrateLegacyCache(legacyPath, cacheFile); err != nil {
+			fmt.Fprintf(sl.stderr, "warning: failed to migrate cache: %v\n", err)
 		}
-		cacheFile = filepath.Join(homeDir, ".claude", ".usage_cache.json")
 	}
 
 	// キャッシュの有効性をチェックし、必要に応じて取得
@@ -186,28 +306,53 @@ func (sl *StatusLine) run(stdin io.Reader, stdout io.Writer, cacheFile string) e
 	resetTime := formatResetTime(cache.ResetsAt)
 	weeklyResetTime := formatResetTimeWithDate(cache.WeeklyResetsAt)
 
-	// 使用率をフォーマット（色付き）
-	fiveHourUsage := sl.colorizeUsage(cache.Utilization)
-	weeklyUsage := sl.colorizeUsage(cache.WeeklyUtilization)
+	// 使用率をフォーマット（色付き、設定されたバー幅で）
+	fiveHourUsage := colorizeUsageWithWidth(cache.Utilization, cfg.BarWidth)
+	weeklyUsage := colorizeUsageWithWidth(cache.WeeklyUtilization, cfg.BarWidth)
 
-	// ステータスラインを出力
-	if resetTime != "" {
-		if weeklyResetTime != "" {
-			fmt.Fprintf(stdout, "go-statusline | Model: %s | Total Tokens: %s | 5h: %s | resets: %s | week: %s | resets: %s\n",
-				input.Model.DisplayName, totalTokensStr, fiveHourUsage, resetTime, weeklyUsage, weeklyResetTime)
+	// 異常値の警告
+	if cache.Utilization < 0 || cache.Utilization > 100 {
+		fmt.Fprintf(sl.stderr, "warning: unexpected usage value: %.1f\n", cache.Utilization)
+	}
+	if cache.WeeklyUtilization < 0 || cache.WeeklyUtilization > 100 {
+		fmt.Fprintf(sl.stderr, "warning: unexpected weekly usage value: %.1f\n", cache.WeeklyUtilization)
+	}
+
+	// ステータスラインを動的に構築
+	var parts []string
+
+	if cfg.ShowAppName {
+		parts = append(parts, "go-statusline")
+	}
+	if cfg.ShowModel {
+		parts = append(parts, fmt.Sprintf("Model: %s", input.Model.DisplayName))
+	}
+	if cfg.ShowTokens {
+		parts = append(parts, fmt.Sprintf("Total Tokens: %s", totalTokensStr))
+	}
+	if cfg.Show5hUsage {
+		parts = append(parts, fmt.Sprintf("5h: %s", fiveHourUsage))
+	}
+	if cfg.Show5hResets {
+		if resetTime != "" {
+			parts = append(parts, fmt.Sprintf("resets: %s", resetTime))
 		} else {
-			fmt.Fprintf(stdout, "go-statusline | Model: %s | Total Tokens: %s | 5h: %s | resets: %s | week: %s | resets: N/A\n",
-				input.Model.DisplayName, totalTokensStr, fiveHourUsage, resetTime, weeklyUsage)
-		}
-	} else {
-		if weeklyResetTime != "" {
-			fmt.Fprintf(stdout, "go-statusline | Model: %s | Total Tokens: %s | 5h: %s | resets: N/A | week: %s | resets: %s\n",
-				input.Model.DisplayName, totalTokensStr, fiveHourUsage, weeklyUsage, weeklyResetTime)
-		} else {
-			fmt.Fprintf(stdout, "go-statusline | Model: %s | Total Tokens: %s | 5h: %s | resets: N/A | week: %s | resets: N/A\n",
-				input.Model.DisplayName, totalTokensStr, fiveHourUsage, weeklyUsage)
+			parts = append(parts, "resets: N/A")
 		}
 	}
+	if cfg.ShowWeekUsage {
+		parts = append(parts, fmt.Sprintf("week: %s", weeklyUsage))
+	}
+	if cfg.ShowWeekResets {
+		if weeklyResetTime != "" {
+			parts = append(parts, fmt.Sprintf("resets: %s", weeklyResetTime))
+		} else {
+			parts = append(parts, "resets: N/A")
+		}
+	}
+
+	// 出力
+	fmt.Fprintf(stdout, "%s\n", strings.Join(parts, " | "))
 
 	return nil
 }
@@ -239,6 +384,11 @@ func (sl *StatusLine) colorizeUsage(usage float64) string {
 
 // colorizeUsageInternal は使用率に応じて色付けした文字列とプログレスバーを返す（内部実装）
 func colorizeUsageInternal(usage float64) string {
+	return colorizeUsageWithWidth(usage, barWidth)
+}
+
+// colorizeUsageWithWidth は指定された幅で使用率を色付けしたプログレスバーを返す
+func colorizeUsageWithWidth(usage float64, width int) string {
 	var color string
 	switch {
 	case usage < usageThresholdYellow:
@@ -252,7 +402,7 @@ func colorizeUsageInternal(usage float64) string {
 	}
 
 	// バーの塗りつぶし文字数を計算
-	totalBlocks := usage / 100.0 * float64(barWidth)
+	totalBlocks := usage / 100.0 * float64(width)
 
 	// 負の値は0にクリップ
 	if totalBlocks < 0 {
@@ -260,14 +410,14 @@ func colorizeUsageInternal(usage float64) string {
 	}
 
 	filled := int(totalBlocks)
-	if filled > barWidth {
-		filled = barWidth
+	if filled > width {
+		filled = width
 	}
 
 	// 小数部分から下方向部分ブロック文字を選択
 	var shade string
 	shadeWidth := 0
-	if filled < barWidth {
+	if filled < width {
 		fraction := totalBlocks - float64(filled)
 		switch {
 		case fraction >= shadeThreshold5:
@@ -292,7 +442,7 @@ func colorizeUsageInternal(usage float64) string {
 	}
 
 	// バーを構築: 完全ブロック + シェード + 空白
-	empty := barWidth - filled - shadeWidth
+	empty := width - filled - shadeWidth
 	bar := strings.Repeat("█", filled) + shade + strings.Repeat(" ", empty)
 	return fmt.Sprintf("%s%.1f%% [%s]%s", color, usage, bar, colorReset)
 }

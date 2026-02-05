@@ -10,6 +10,8 @@ Claude Code ステータスライン表示ツール
 
 - golang 1.21以上（ビルド時のみ）
 - Claude Code の認証情報が `~/.claude/.credentials.json` に保存されていること
+  - Claude Code にログインすると自動的に作成されます
+  - macOS では Keychain に保存される場合もあります
 
 ## インストール
 
@@ -42,6 +44,108 @@ chmod +x ~/.claude/statusline
   }
 }
 ```
+
+## 使い方
+
+Claude Code を起動すると、ステータスラインに以下のような情報が表示されます：
+
+```
+go-statusline | Model: Sonnet 4.5 | Total Tokens: 200.0k | 5h: 34.0% [██████▆             ] | resets: 14:00 | week: 22.0% [████▃               ] | resets: 02/05 14:00
+```
+
+5h, week はプログレスバー付きで表示され、使用率に応じて色が変化します：
+- 0-24%: 緑
+- 25-49%: 黄
+- 50-74%: オレンジ
+- 75-100%: 赤
+
+## 出力フィールド
+
+| フィールド | 説明 |
+|-----------|------|
+| go-statusline | アプリケーション名 |
+| Model | 現在のモデル名 |
+| Total Tokens | 累積トークン数（入力 + 出力） |
+| 5h | 5時間使用率（パーセンテージ + プログレスバー） |
+| resets (5h) | 5時間枠の次のリセット時刻（HH:MM形式） |
+| week | 週間使用率（パーセンテージ + プログレスバー） |
+| resets (week) | 週間枠の次のリセット時刻（MM/DD HH:MM形式） |
+
+## 設定
+
+設定ファイル `~/.config/go-statusline/config.json` で表示内容をカスタマイズできます。
+
+### 設定項目
+
+| 設定キー | デフォルト | 説明 |
+|----------|-----------|------|
+| `show_app_name` | true | 「go-statusline」の表示 |
+| `show_model` | true | モデル名の表示 |
+| `show_tokens` | true | トークン数の表示 |
+| `show_5h_usage` | true | 5時間使用率の表示 |
+| `show_5h_resets` | true | 5時間リセット時刻の表示 |
+| `show_week_usage` | true | 週間使用率の表示 |
+| `show_week_resets` | true | 週間リセット時刻の表示 |
+| `bar_width` | 20 | プログレスバーの幅（文字数） |
+
+### 設定ファイル例
+
+デフォルト設定（全て表示）:
+
+```json
+{
+  "show_app_name": true,
+  "show_model": true,
+  "show_tokens": true,
+  "show_5h_usage": true,
+  "show_5h_resets": true,
+  "show_week_usage": true,
+  "show_week_resets": true,
+  "bar_width": 20
+}
+```
+
+コンパクト設定:
+
+```json
+{
+  "show_app_name": false,
+  "show_model": false,
+  "show_tokens": false,
+  "bar_width": 10
+}
+```
+
+出力例:
+```
+5h: 34.0% [███▃      ] | resets: 14:00 | week: 22.0% [██▂       ] | resets: 02/05 14:00
+```
+
+設定ファイルが存在しない場合はデフォルト設定で動作します。一部の項目のみ設定した場合、指定していない項目はデフォルト値が使用されます。
+
+## キャッシュ
+
+使用データは `~/.config/go-statusline/cache.json` にキャッシュされます。キャッシュの有効期限は **2分間** で、期限が切れると自動的にAPIから最新のデータを取得します。また、`~/.claude/history.jsonl` が更新された場合もキャッシュを無効化してAPIから再取得します（ただし最小30秒間隔）。
+
+### キャッシュ構造
+
+```json
+{
+  "resets_at": "2026-01-05T14:00:00Z",
+  "utilization": 34.0,
+  "weekly_utilization": 22.0,
+  "weekly_resets_at": "2026-01-10T14:00:00Z",
+  "cached_at": 1736072345
+}
+```
+
+### 旧キャッシュからの移行
+
+以前のバージョンで `~/.claude/.usage_cache.json` にキャッシュが保存されていた場合、初回実行時に自動的に新しい場所へ移行されます。
+
+## XDG Base Directory 対応
+
+設定ファイルとキャッシュファイルは XDG Base Directory Specification に準拠しています。`XDG_CONFIG_HOME` 環境変数が設定されている場合、`$XDG_CONFIG_HOME/go-statusline/` が使用されます。
 
 ## 開発
 
@@ -79,45 +183,6 @@ GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o statusline-darwin-amd64
 
 # macOS (Apple Silicon)
 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o statusline-darwin-arm64
-```
-
-## 使い方
-
-Claude Code を起動すると、ステータスラインに以下のような情報が表示されます：
-
-```
-go-statusline | Model: Sonnet 4.5 | Total Tokens: 200.0k | 5h: 34.0% [██████▆             ] | resets: 14:00 | week: 22.0% [████▃               ]
-```
-
-5h, week はプログレスバー（20文字幅）付きで表示され、使用率に応じて色が変化します：
-- 0-24%: 緑
-- 25-49%: 黄
-- 50-74%: オレンジ
-- 75-100%: 赤
-
-## 出力フィールド
-
-| フィールド | 説明 |
-|-----------|------|
-| Model | 現在のモデル名 |
-| Total Tokens | 累積トークン数（入力 + 出力） |
-| 5h | 5時間使用率（パーセンテージ + プログレスバー） |
-| resets | 5時間枠の次のリセット時刻（HH:MM形式） |
-| week | 週間使用率（パーセンテージ + プログレスバー） |
-
-## キャッシュ
-
-使用データは `~/.claude/.usage_cache.json` にキャッシュされます。キャッシュの有効期限は **2分間** で、期限が切れると自動的にAPIから最新のデータを取得します。また、`history.jsonl` が更新された場合もキャッシュを無効化してAPIから再取得します（ただし最小30秒間隔）。
-
-### キャッシュ構造
-
-```json
-{
-  "resets_at": "2026-01-05T14:00:00Z",
-  "utilization": 34.0,
-  "weekly_utilization": 22.0,
-  "cached_at": 1736072345
-}
 ```
 
 ## サポートプラットフォーム

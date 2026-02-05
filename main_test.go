@@ -1406,3 +1406,263 @@ func TestColorizeUsage(t *testing.T) {
 		})
 	}
 }
+
+func TestDefaultConfig(t *testing.T) {
+	cfg := defaultConfig()
+
+	// 全てのフラグがtrueであることを確認
+	if !cfg.ShowAppName {
+		t.Error("ShowAppName should be true by default")
+	}
+	if !cfg.ShowModel {
+		t.Error("ShowModel should be true by default")
+	}
+	if !cfg.ShowTokens {
+		t.Error("ShowTokens should be true by default")
+	}
+	if !cfg.Show5hUsage {
+		t.Error("Show5hUsage should be true by default")
+	}
+	if !cfg.Show5hResets {
+		t.Error("Show5hResets should be true by default")
+	}
+	if !cfg.ShowWeekUsage {
+		t.Error("ShowWeekUsage should be true by default")
+	}
+	if !cfg.ShowWeekResets {
+		t.Error("ShowWeekResets should be true by default")
+	}
+	if cfg.BarWidth != 20 {
+		t.Errorf("BarWidth should be 20 by default, got %d", cfg.BarWidth)
+	}
+}
+
+func TestLoadConfig(t *testing.T) {
+	t.Run("returns default config when file does not exist", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.json")
+
+		cfg, err := loadConfigFromPath(configPath)
+		if err != nil {
+			t.Fatalf("loadConfigFromPath failed: %v", err)
+		}
+
+		// デフォルト値が設定されていることを確認
+		if !cfg.ShowAppName {
+			t.Error("ShowAppName should be true")
+		}
+		if cfg.BarWidth != 20 {
+			t.Errorf("BarWidth should be 20, got %d", cfg.BarWidth)
+		}
+	})
+
+	t.Run("loads config from file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.json")
+
+		// 設定ファイルを作成
+		configJSON := `{
+			"show_app_name": false,
+			"show_model": false,
+			"show_tokens": true,
+			"show_5h_usage": true,
+			"show_5h_resets": true,
+			"show_week_usage": true,
+			"show_week_resets": false,
+			"bar_width": 10
+		}`
+		os.WriteFile(configPath, []byte(configJSON), 0644)
+
+		cfg, err := loadConfigFromPath(configPath)
+		if err != nil {
+			t.Fatalf("loadConfigFromPath failed: %v", err)
+		}
+
+		if cfg.ShowAppName {
+			t.Error("ShowAppName should be false")
+		}
+		if cfg.ShowModel {
+			t.Error("ShowModel should be false")
+		}
+		if !cfg.ShowTokens {
+			t.Error("ShowTokens should be true")
+		}
+		if cfg.ShowWeekResets {
+			t.Error("ShowWeekResets should be false")
+		}
+		if cfg.BarWidth != 10 {
+			t.Errorf("BarWidth should be 10, got %d", cfg.BarWidth)
+		}
+	})
+
+	t.Run("uses default for missing fields", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.json")
+
+		// 一部のフィールドのみ設定
+		configJSON := `{"bar_width": 15}`
+		os.WriteFile(configPath, []byte(configJSON), 0644)
+
+		cfg, err := loadConfigFromPath(configPath)
+		if err != nil {
+			t.Fatalf("loadConfigFromPath failed: %v", err)
+		}
+
+		// 指定したフィールドは読み込まれる
+		if cfg.BarWidth != 15 {
+			t.Errorf("BarWidth should be 15, got %d", cfg.BarWidth)
+		}
+		// 指定していないフィールドはデフォルト値
+		if !cfg.ShowAppName {
+			t.Error("ShowAppName should be true (default)")
+		}
+	})
+
+	t.Run("returns error for invalid JSON", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		configPath := filepath.Join(tmpDir, "config.json")
+
+		os.WriteFile(configPath, []byte("invalid json"), 0644)
+
+		_, err := loadConfigFromPath(configPath)
+		if err == nil {
+			t.Error("loadConfigFromPath should fail for invalid JSON")
+		}
+	})
+}
+
+func TestColorizeUsageWithBarWidth(t *testing.T) {
+	tests := []struct {
+		name        string
+		usage       float64
+		barWidth    int
+		wantContain string // バー部分に含まれる文字列
+	}{
+		{"width 10 at 50%", 50.0, 10, "[█████     ]"},
+		{"width 5 at 50%", 50.0, 5, "[██▅  ]"},
+		{"width 15 at 0%", 0.0, 15, "[               ]"},
+		{"width 10 at 100%", 100.0, 10, "[██████████]"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := colorizeUsageWithWidth(tt.usage, tt.barWidth)
+			if !strings.Contains(result, tt.wantContain) {
+				t.Errorf("result should contain %q, got: %s", tt.wantContain, result)
+			}
+		})
+	}
+}
+
+func TestGetConfigDir(t *testing.T) {
+	t.Run("uses XDG_CONFIG_HOME when set", func(t *testing.T) {
+		originalXDG := os.Getenv("XDG_CONFIG_HOME")
+		defer os.Setenv("XDG_CONFIG_HOME", originalXDG)
+
+		os.Setenv("XDG_CONFIG_HOME", "/custom/config")
+		result := getConfigDir()
+		expected := "/custom/config/go-statusline"
+		if result != expected {
+			t.Errorf("getConfigDir() = %s, expected %s", result, expected)
+		}
+	})
+
+	t.Run("uses ~/.config when XDG_CONFIG_HOME is not set", func(t *testing.T) {
+		originalXDG := os.Getenv("XDG_CONFIG_HOME")
+		defer os.Setenv("XDG_CONFIG_HOME", originalXDG)
+
+		os.Unsetenv("XDG_CONFIG_HOME")
+		result := getConfigDir()
+		homeDir, _ := os.UserHomeDir()
+		expected := filepath.Join(homeDir, ".config", "go-statusline")
+		if result != expected {
+			t.Errorf("getConfigDir() = %s, expected %s", result, expected)
+		}
+	})
+}
+
+func TestMigrateLegacyCache(t *testing.T) {
+	t.Run("migrates legacy cache to new location", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		legacyDir := filepath.Join(tmpDir, ".claude")
+		newDir := filepath.Join(tmpDir, ".config", "go-statusline")
+
+		// 旧ディレクトリとキャッシュファイルを作成
+		os.MkdirAll(legacyDir, 0755)
+		legacyPath := filepath.Join(legacyDir, ".usage_cache.json")
+		testData := []byte(`{"utilization": 50.0}`)
+		os.WriteFile(legacyPath, testData, 0644)
+
+		newPath := filepath.Join(newDir, "cache.json")
+
+		// 移行実行
+		err := migrateLegacyCache(legacyPath, newPath)
+		if err != nil {
+			t.Fatalf("migrateLegacyCache failed: %v", err)
+		}
+
+		// 新しいファイルが存在することを確認
+		if _, err := os.Stat(newPath); os.IsNotExist(err) {
+			t.Error("new cache file should exist after migration")
+		}
+
+		// 旧ファイルが削除されていることを確認
+		if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+			t.Error("legacy cache file should be deleted after migration")
+		}
+
+		// 内容が正しいことを確認
+		data, _ := os.ReadFile(newPath)
+		if string(data) != string(testData) {
+			t.Errorf("migrated data = %s, expected %s", string(data), string(testData))
+		}
+	})
+
+	t.Run("does nothing when legacy file does not exist", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		legacyPath := filepath.Join(tmpDir, ".claude", ".usage_cache.json")
+		newPath := filepath.Join(tmpDir, ".config", "go-statusline", "cache.json")
+
+		err := migrateLegacyCache(legacyPath, newPath)
+		if err != nil {
+			t.Fatalf("migrateLegacyCache should not fail: %v", err)
+		}
+
+		// 新しいファイルも作成されていないことを確認
+		if _, err := os.Stat(newPath); !os.IsNotExist(err) {
+			t.Error("new cache file should not be created when legacy does not exist")
+		}
+	})
+
+	t.Run("does nothing when new file already exists", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		legacyDir := filepath.Join(tmpDir, ".claude")
+		newDir := filepath.Join(tmpDir, ".config", "go-statusline")
+
+		// 両方のファイルを作成
+		os.MkdirAll(legacyDir, 0755)
+		os.MkdirAll(newDir, 0755)
+
+		legacyPath := filepath.Join(legacyDir, ".usage_cache.json")
+		newPath := filepath.Join(newDir, "cache.json")
+
+		os.WriteFile(legacyPath, []byte(`{"utilization": 30.0}`), 0644)
+		os.WriteFile(newPath, []byte(`{"utilization": 50.0}`), 0644)
+
+		err := migrateLegacyCache(legacyPath, newPath)
+		if err != nil {
+			t.Fatalf("migrateLegacyCache should not fail: %v", err)
+		}
+
+		// 新しいファイルの内容が変わっていないことを確認
+		data, _ := os.ReadFile(newPath)
+		if string(data) != `{"utilization": 50.0}` {
+			t.Errorf("new cache file should not be overwritten, got: %s", string(data))
+		}
+
+		// 旧ファイルもそのまま残っていることを確認
+		if _, err := os.Stat(legacyPath); os.IsNotExist(err) {
+			t.Error("legacy file should remain when new file already exists")
+		}
+	})
+}
