@@ -147,6 +147,106 @@ go-statusline | Model: Sonnet 4.5 | Total Tokens: 200.0k | 5h: 34.0% [███�
 
 設定ファイルとキャッシュファイルは XDG Base Directory Specification に準拠しています。`XDG_CONFIG_HOME` 環境変数が設定されている場合、`$XDG_CONFIG_HOME/go-statusline/` が使用されます。
 
+## トラブルシューティング
+
+### ステータスラインが表示されない
+
+1. **settings.json の設定を確認**
+   ```bash
+   cat ~/.claude/settings.json
+   ```
+   `statusLine` の設定が正しいか確認してください。
+
+2. **バイナリの存在を確認**
+   ```bash
+   ls -la ~/.claude/statusline
+   ```
+
+3. **手動実行でエラーを確認**
+   ```bash
+   echo '{"model":{"display_name":"Test"},"context_window":{"total_input_tokens":0,"total_output_tokens":0}}' | ~/.claude/statusline
+   ```
+
+### 認証エラー（API request failed: status 401）
+
+アクセストークンの期限が切れている可能性があります。
+
+1. **Claude Code に再ログイン**
+   ```bash
+   claude logout
+   claude login
+   ```
+
+2. **キャッシュをクリア**
+   ```bash
+   rm ~/.config/go-statusline/cache.json
+   ```
+
+### 使用率が更新されない
+
+キャッシュが残っている可能性があります。
+
+```bash
+rm ~/.config/go-statusline/cache.json
+```
+
+キャッシュは2分間有効です。また、`~/.claude/history.jsonl` が更新されると自動的にキャッシュが無効化されます。
+
+### 設定が反映されない
+
+設定ファイルのJSONが正しいか確認してください。
+
+```bash
+cat ~/.config/go-statusline/config.json | jq .
+```
+
+エラーが出る場合はJSONの構文エラーがあります。設定ファイルを削除すると、次回実行時にデフォルト設定で再生成されます。
+
+```bash
+rm ~/.config/go-statusline/config.json
+```
+
+## アンインストール
+
+### 1. settings.json から設定を削除
+
+`~/.claude/settings.json` から `statusLine` の設定を削除します。
+
+変更前:
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline"
+  },
+  "other_setting": "value"
+}
+```
+
+変更後:
+```json
+{
+  "other_setting": "value"
+}
+```
+
+### 2. バイナリを削除
+
+```bash
+rm ~/.claude/statusline
+```
+
+### 3. 設定ファイルとキャッシュを削除
+
+```bash
+rm -rf ~/.config/go-statusline
+```
+
+XDG_CONFIG_HOME を設定している場合:
+```bash
+rm -rf $XDG_CONFIG_HOME/go-statusline
+```
+
 ## 開発
 
 ### ビルド
