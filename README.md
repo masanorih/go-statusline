@@ -6,6 +6,17 @@ Claude Code ステータスライン表示ツール
 
 このプログラムは、Claude Code のステータスラインにモデル名、トークン使用量、5時間使用率、週間使用率、リセット時刻を表示します。
 
+## クイックスタート
+
+1. **インストール:** `make install`
+2. **設定:** `~/.claude/settings.json` に以下を追加
+   ```json
+   "statusLine": {"type": "command", "command": "~/.claude/statusline"}
+   ```
+3. **起動:** `claude` を実行
+
+詳細は以下のセクションを参照してください。
+
 ## 必要環境
 
 - golang 1.21以上（ビルド時のみ）
