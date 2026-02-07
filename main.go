@@ -728,11 +728,11 @@ func getHistoryModTimeWithPath(historyFile string) (time.Time, error) {
 	return info.ModTime(), nil
 }
 
-// roundUpToMinute は時刻を分単位で切り上げる
-// 秒数やナノ秒がある場合は次の分に切り上げ、ちょうどの分ならそのまま
-func roundUpToMinute(t time.Time) time.Time {
+// roundToNearestMinute は時刻を最も近い分に丸める
+// 30秒以上なら次の分に切り上げ、30秒未満なら切り捨て
+func roundToNearestMinute(t time.Time) time.Time {
 	truncated := t.Truncate(time.Minute)
-	if t.After(truncated) {
+	if t.Sub(truncated) >= 30*time.Second {
 		return truncated.Add(time.Minute)
 	}
 	return truncated
@@ -751,7 +751,7 @@ func formatResetTime(resetsAt string) string {
 	}
 
 	// 分単位で切り上げ
-	t = roundUpToMinute(t)
+	t = roundToNearestMinute(t)
 
 	// ローカル時刻に変換してフォーマット
 	localTime := t.Local()
@@ -771,7 +771,7 @@ func formatResetTimeWithDate(resetsAt string) string {
 	}
 
 	// 分単位で切り上げ
-	t = roundUpToMinute(t)
+	t = roundToNearestMinute(t)
 
 	// ローカル時刻に変換してフォーマット（MM/DD HH:MM）
 	localTime := t.Local()

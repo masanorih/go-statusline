@@ -180,7 +180,7 @@ func TestIsCacheValidWithHistoryCheck(t *testing.T) {
 	})
 }
 
-func TestRoundUpToMinute(t *testing.T) {
+func TestRoundToNearestMinute(t *testing.T) {
 	tests := []struct {
 		name     string
 		input    time.Time
@@ -192,32 +192,42 @@ func TestRoundUpToMinute(t *testing.T) {
 			expected: time.Date(2026, 1, 5, 10, 30, 0, 0, time.UTC),
 		},
 		{
-			name:     "1 second after minute",
+			name:     "1 second after minute - rounds down",
 			input:    time.Date(2026, 1, 5, 10, 30, 1, 0, time.UTC),
-			expected: time.Date(2026, 1, 5, 10, 31, 0, 0, time.UTC),
+			expected: time.Date(2026, 1, 5, 10, 30, 0, 0, time.UTC),
 		},
 		{
-			name:     "30 seconds after minute",
+			name:     "29 seconds after minute - rounds down",
+			input:    time.Date(2026, 1, 5, 10, 30, 29, 0, time.UTC),
+			expected: time.Date(2026, 1, 5, 10, 30, 0, 0, time.UTC),
+		},
+		{
+			name:     "30 seconds after minute - rounds up",
 			input:    time.Date(2026, 1, 5, 10, 30, 30, 0, time.UTC),
 			expected: time.Date(2026, 1, 5, 10, 31, 0, 0, time.UTC),
 		},
 		{
-			name:     "59 seconds after minute",
+			name:     "59 seconds after minute - rounds up",
 			input:    time.Date(2026, 1, 5, 10, 30, 59, 0, time.UTC),
 			expected: time.Date(2026, 1, 5, 10, 31, 0, 0, time.UTC),
 		},
 		{
-			name:     "nanoseconds only",
+			name:     "nanoseconds only - rounds down",
 			input:    time.Date(2026, 1, 5, 10, 30, 0, 1, time.UTC),
-			expected: time.Date(2026, 1, 5, 10, 31, 0, 0, time.UTC),
+			expected: time.Date(2026, 1, 5, 10, 30, 0, 0, time.UTC),
 		},
 		{
-			name:     "end of hour",
+			name:     "API-like 59 seconds before hour - rounds up",
+			input:    time.Date(2026, 1, 5, 10, 59, 59, 0, time.UTC),
+			expected: time.Date(2026, 1, 5, 11, 0, 0, 0, time.UTC),
+		},
+		{
+			name:     "end of hour with 30 seconds - rounds up",
 			input:    time.Date(2026, 1, 5, 10, 59, 30, 0, time.UTC),
 			expected: time.Date(2026, 1, 5, 11, 0, 0, 0, time.UTC),
 		},
 		{
-			name:     "end of day",
+			name:     "end of day - rounds up",
 			input:    time.Date(2026, 1, 5, 23, 59, 30, 0, time.UTC),
 			expected: time.Date(2026, 1, 6, 0, 0, 0, 0, time.UTC),
 		},
@@ -225,9 +235,9 @@ func TestRoundUpToMinute(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := roundUpToMinute(tt.input)
+			result := roundToNearestMinute(tt.input)
 			if !result.Equal(tt.expected) {
-				t.Errorf("roundUpToMinute(%v) = %v, expected %v", tt.input, result, tt.expected)
+				t.Errorf("roundToNearestMinute(%v) = %v, expected %v", tt.input, result, tt.expected)
 			}
 		})
 	}
