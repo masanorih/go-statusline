@@ -388,29 +388,8 @@ func formatTokens(tokens int64) string {
 	return fmt.Sprintf("%d", tokens)
 }
 
-// colorizeUsage は使用率に応じて色付けした文字列とプログレスバーを返す
-// 下方向部分ブロック文字(▁▂▃▅▆▇)で6段階の小数部を表現
-func colorizeUsage(usage float64) string {
-	sl := &StatusLine{stderr: io.Discard}
-	return sl.colorizeUsage(usage)
-}
-
-// colorizeUsage は使用率に応じて色付けした文字列とプログレスバーを返す（StatusLineメソッド版）
-func (sl *StatusLine) colorizeUsage(usage float64) string {
-	// 異常値の警告
-	if usage < 0 || usage > 100 {
-		fmt.Fprintf(sl.stderr, "warning: unexpected usage value: %.1f\n", usage)
-	}
-
-	return colorizeUsageInternal(usage)
-}
-
-// colorizeUsageInternal は使用率に応じて色付けした文字列とプログレスバーを返す（内部実装）
-func colorizeUsageInternal(usage float64) string {
-	return colorizeUsageWithWidth(usage, barWidth)
-}
-
 // colorizeUsageWithWidth は指定された幅で使用率を色付けしたプログレスバーを返す
+// 下方向部分ブロック文字(▁▂▃▅▆▇)で6段階の小数部を表現
 func colorizeUsageWithWidth(usage float64, width int) string {
 	var color string
 	switch {
@@ -503,12 +482,6 @@ func (sl *StatusLine) isCacheValid(cache *CacheData) bool {
 }
 
 // getCachedOrFetch はキャッシュデータを取得、またはAPIから取得
-func getCachedOrFetch(cacheFile string) (*CacheData, error) {
-	sl := NewStatusLine()
-	return sl.getCachedOrFetch(cacheFile, apiEndpoint)
-}
-
-// getCachedOrFetch はキャッシュデータを取得、またはAPIから取得（StatusLineメソッド版）
 func (sl *StatusLine) getCachedOrFetch(cacheFile string, endpoint string) (*CacheData, error) {
 	// キャッシュの読み込みを試行
 	cache, err := readCache(cacheFile)
@@ -542,12 +515,6 @@ func readCache(cacheFile string) (*CacheData, error) {
 }
 
 // fetchFromAPI はAPIから使用状況データを取得してキャッシュを更新
-func fetchFromAPI(cacheFile string) (*CacheData, error) {
-	sl := NewStatusLine()
-	return sl.fetchFromAPI(cacheFile, apiEndpoint)
-}
-
-// fetchFromAPI はAPIから使用状況データを取得してキャッシュを更新（StatusLineメソッド版）
 func (sl *StatusLine) fetchFromAPI(cacheFile string, endpoint string) (*CacheData, error) {
 	// アクセストークンを取得
 	token, err := sl.getAccessToken()

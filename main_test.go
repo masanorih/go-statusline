@@ -1335,12 +1335,38 @@ func TestNewStatusLine(t *testing.T) {
 	})
 }
 
-func TestColorizeUsageWarnings(t *testing.T) {
-	t.Run("logs warning for negative usage", func(t *testing.T) {
-		stderr := &bytes.Buffer{}
-		sl := NewStatusLine(WithStderr(stderr))
+func TestRunWithConfigUsageWarnings(t *testing.T) {
+	makeInput := func() *bytes.Reader {
+		input := InputData{}
+		input.Model.DisplayName = "Sonnet 4"
+		input.ContextWindow.TotalInputTokens = 100
+		input.ContextWindow.TotalOutputTokens = 100
+		inputJSON, _ := json.Marshal(input)
+		return bytes.NewReader(inputJSON)
+	}
 
-		_ = sl.colorizeUsage(-5.0)
+	t.Run("logs warning for negative usage", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+		saveCache(cacheFile, &CacheData{
+			ResetsAt:    "2026-01-27T10:00:00Z",
+			Utilization: -5.0,
+			CachedAt:    time.Now().Unix() - 10,
+		})
+
+		stderr := &bytes.Buffer{}
+		sl := NewStatusLine(
+			WithStderr(stderr),
+			WithHistoryModTimeFunc(func() (time.Time, error) {
+				return time.Time{}, os.ErrNotExist
+			}),
+		)
+
+		cfg := defaultConfig()
+		err := sl.runWithConfig(makeInput(), &bytes.Buffer{}, cacheFile, cfg)
+		if err != nil {
+			t.Fatalf("runWithConfig failed: %v", err)
+		}
 
 		if !strings.Contains(stderr.String(), "warning") {
 			t.Errorf("stderr should contain warning for negative usage, got: %s", stderr.String())
@@ -1348,21 +1374,85 @@ func TestColorizeUsageWarnings(t *testing.T) {
 	})
 
 	t.Run("logs warning for usage over 100", func(t *testing.T) {
-		stderr := &bytes.Buffer{}
-		sl := NewStatusLine(WithStderr(stderr))
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+		saveCache(cacheFile, &CacheData{
+			ResetsAt:    "2026-01-27T10:00:00Z",
+			Utilization: 105.0,
+			CachedAt:    time.Now().Unix() - 10,
+		})
 
-		_ = sl.colorizeUsage(105.0)
+		stderr := &bytes.Buffer{}
+		sl := NewStatusLine(
+			WithStderr(stderr),
+			WithHistoryModTimeFunc(func() (time.Time, error) {
+				return time.Time{}, os.ErrNotExist
+			}),
+		)
+
+		cfg := defaultConfig()
+		err := sl.runWithConfig(makeInput(), &bytes.Buffer{}, cacheFile, cfg)
+		if err != nil {
+			t.Fatalf("runWithConfig failed: %v", err)
+		}
 
 		if !strings.Contains(stderr.String(), "warning") {
 			t.Errorf("stderr should contain warning for usage > 100, got: %s", stderr.String())
 		}
 	})
 
-	t.Run("no warning for normal usage", func(t *testing.T) {
-		stderr := &bytes.Buffer{}
-		sl := NewStatusLine(WithStderr(stderr))
+	t.Run("logs warning for negative weekly usage", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+		saveCache(cacheFile, &CacheData{
+			ResetsAt:          "2026-01-27T10:00:00Z",
+			Utilization:       50.0,
+			WeeklyUtilization: -3.0,
+			CachedAt:          time.Now().Unix() - 10,
+		})
 
-		_ = sl.colorizeUsage(50.0)
+		stderr := &bytes.Buffer{}
+		sl := NewStatusLine(
+			WithStderr(stderr),
+			WithHistoryModTimeFunc(func() (time.Time, error) {
+				return time.Time{}, os.ErrNotExist
+			}),
+		)
+
+		cfg := defaultConfig()
+		err := sl.runWithConfig(makeInput(), &bytes.Buffer{}, cacheFile, cfg)
+		if err != nil {
+			t.Fatalf("runWithConfig failed: %v", err)
+		}
+
+		if !strings.Contains(stderr.String(), "warning: unexpected weekly usage value") {
+			t.Errorf("stderr should contain weekly warning, got: %s", stderr.String())
+		}
+	})
+
+	t.Run("no warning for normal usage", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+		saveCache(cacheFile, &CacheData{
+			ResetsAt:          "2026-01-27T10:00:00Z",
+			Utilization:       50.0,
+			WeeklyUtilization: 20.0,
+			CachedAt:          time.Now().Unix() - 10,
+		})
+
+		stderr := &bytes.Buffer{}
+		sl := NewStatusLine(
+			WithStderr(stderr),
+			WithHistoryModTimeFunc(func() (time.Time, error) {
+				return time.Time{}, os.ErrNotExist
+			}),
+		)
+
+		cfg := defaultConfig()
+		err := sl.runWithConfig(makeInput(), &bytes.Buffer{}, cacheFile, cfg)
+		if err != nil {
+			t.Fatalf("runWithConfig failed: %v", err)
+		}
 
 		if stderr.Len() > 0 {
 			t.Errorf("stderr should be empty for normal usage, got: %s", stderr.String())
@@ -1409,9 +1499,9 @@ func TestColorizeUsage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := colorizeUsage(tt.usage)
+			result := colorizeUsageWithWidth(tt.usage, barWidth)
 			if result != tt.expected {
-				t.Errorf("colorizeUsage(%v) = %q, want %q", tt.usage, result, tt.expected)
+				t.Errorf("colorizeUsageWithWidth(%v, %d) = %q, want %q", tt.usage, barWidth, result, tt.expected)
 			}
 		})
 	}
