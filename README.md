@@ -24,6 +24,20 @@ Claude Code ステータスライン表示ツール
   - Claude Code にログインすると自動的に作成されます
   - macOS では Keychain に保存される場合もあります
 
+> **Note on Anthropic's Authentication Policy**
+>
+> This tool reads OAuth tokens stored by Claude Code to access the usage statistics API.
+> Anthropic's [authentication and credential use policy](https://code.claude.com/docs/en/legal-and-compliance#authentication-and-credential-use)
+> states that OAuth tokens from Free, Pro, and Max plans are intended exclusively for Claude Code and Claude.ai.
+>
+> `go-statusline` is designed to run solely as a Claude Code statusline plugin — invoked by Claude Code
+> itself via `settings.json` — and only reads your own plan's usage statistics.
+> It does not call any language model API.
+> Note that switching to an API key is not a viable alternative, as the 5-hour and weekly usage
+> metrics are specific to OAuth subscription plans and have no API key equivalent.
+>
+> Use at your own discretion and in accordance with Anthropic's terms.
+
 ## インストール
 
 ### ビルド済みバイナリをインストール
