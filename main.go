@@ -2,19 +2,21 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const (
 	pollInterval     = 2 * time.Minute                             // 最大キャッシュ有効期限（2分）
-	minFetchInterval = 30 * time.Second                            // 最小APIアクセス間隔（30秒）
+	minFetchInterval = 45 * time.Second                            // 最小APIアクセス間隔（45秒）
 	apiEndpoint      = "https://api.anthropic.com/api/oauth/usage" // Anthropic API エンドポイント
 	apiBeta          = "oauth-2025-04-20"                          // API ベータ版指定
 
@@ -265,6 +267,30 @@ type Credentials struct {
 	} `json:"claudeAiOauth"`
 }
 
+const defaultRetryAfter = 60 * time.Second
+
+// RateLimitError は API の Rate Limit レスポンスを表すエラー型
+type RateLimitError struct {
+	RetryAfter time.Duration
+}
+
+func (e *RateLimitError) Error() string {
+	return fmt.Sprintf("rate limited: retry after %v", e.RetryAfter)
+}
+
+// parseRetryAfter は Retry-After ヘッダーの値をパースする
+// 秒数形式のみサポート。パース失敗時はデフォルト値を返す
+func parseRetryAfter(value string) time.Duration {
+	if value == "" {
+		return defaultRetryAfter
+	}
+	seconds, err := strconv.Atoi(value)
+	if err != nil {
+		return defaultRetryAfter
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 // APIResponse は Anthropic API のレスポンス構造
 type APIResponse struct {
 	FiveHour struct {
@@ -499,13 +525,27 @@ func (sl *StatusLine) getCachedOrFetch(cacheFile string, endpoint string) (*Cach
 		return cache, nil
 	}
 
+	// 期限切れキャッシュを保持（フォールバック用）
+	staleCache := cache
+
 	// キャッシュが無効または存在しない場合、APIから取得
-	cache, err = sl.fetchFromAPI(cacheFile, endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch from API: %w", err)
+	newCache, fetchErr := sl.fetchFromAPI(cacheFile, endpoint)
+	if fetchErr == nil {
+		return newCache, nil
 	}
 
-	return cache, nil
+	// Rate Limit エラー時: 期限切れキャッシュにフォールバック
+	var rateLimitErr *RateLimitError
+	if errors.As(fetchErr, &rateLimitErr) && staleCache != nil && staleCache.ResetsAt != "" {
+		// CachedAt を更新してバックオフ期間中の再リクエストを防ぐ
+		staleCache.CachedAt = time.Now().Unix()
+		if saveErr := saveCache(cacheFile, staleCache); saveErr != nil {
+			fmt.Fprintf(sl.stderr, "warning: failed to save cache: %v\n", saveErr)
+		}
+		return staleCache, nil
+	}
+
+	return nil, fmt.Errorf("failed to fetch from API: %w", fetchErr)
 }
 
 // readCache はファイルからキャッシュを読み込む
@@ -548,6 +588,11 @@ func (sl *StatusLine) fetchFromAPI(cacheFile string, endpoint string) (*CacheDat
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusTooManyRequests {
+		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
+		return nil, &RateLimitError{RetryAfter: retryAfter}
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("API request failed: status %d", resp.StatusCode)

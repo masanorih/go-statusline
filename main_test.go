@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -729,9 +730,10 @@ func TestRun(t *testing.T) {
 			}),
 		)
 
-		err := sl.run(stdin, stdout, cacheFile)
+		cfg := defaultConfig()
+		err := sl.runWithConfig(stdin, stdout, cacheFile, cfg)
 		if err != nil {
-			t.Fatalf("run failed: %v", err)
+			t.Fatalf("runWithConfig failed: %v", err)
 		}
 
 		output := stdout.String()
@@ -790,9 +792,10 @@ func TestRun(t *testing.T) {
 		)
 
 		// API呼び出しは失敗するがデフォルト値で継続
-		err := sl.run(stdin, stdout, cacheFile)
+		cfg := defaultConfig()
+		err := sl.runWithConfig(stdin, stdout, cacheFile, cfg)
 		if err != nil {
-			t.Fatalf("run failed: %v", err)
+			t.Fatalf("runWithConfig failed: %v", err)
 		}
 
 		output := stdout.String()
@@ -953,6 +956,122 @@ func TestGetCachedOrFetch(t *testing.T) {
 		_, err := sl.getCachedOrFetch(cacheFile, server.URL)
 		if err == nil {
 			t.Error("getCachedOrFetch should fail when API returns error")
+		}
+	})
+
+	t.Run("falls back to stale cache on 429", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+
+		// 期限切れだが有効なデータを持つキャッシュ
+		staleCache := &CacheData{
+			ResetsAt:          "2026-01-27T10:00:00Z",
+			Utilization:       70.0,
+			WeeklyUtilization: 25.0,
+			WeeklyResetsAt:    "2026-01-30T10:00:00Z",
+			CachedAt:          time.Now().Unix() - 300, // 5分前（期限切れ）
+		}
+		if err := saveCache(cacheFile, staleCache); err != nil {
+			t.Fatalf("failed to save cache: %v", err)
+		}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Retry-After", "30")
+			w.WriteHeader(http.StatusTooManyRequests)
+		}))
+		defer server.Close()
+
+		sl := NewStatusLine(
+			WithHTTPClient(server.Client()),
+			WithAccessTokenFunc(func() (string, error) {
+				return "test-token", nil
+			}),
+			WithHistoryModTimeFunc(func() (time.Time, error) {
+				return time.Time{}, os.ErrNotExist
+			}),
+		)
+
+		cache, err := sl.getCachedOrFetch(cacheFile, server.URL)
+		if err != nil {
+			t.Fatalf("getCachedOrFetch should succeed with stale cache on 429, got: %v", err)
+		}
+
+		// stale cache のデータが返されること
+		if cache.Utilization != 70.0 {
+			t.Errorf("Utilization = %f, expected 70.0 (from stale cache)", cache.Utilization)
+		}
+		if cache.WeeklyUtilization != 25.0 {
+			t.Errorf("WeeklyUtilization = %f, expected 25.0", cache.WeeklyUtilization)
+		}
+
+		// CachedAt が更新されていること（再リクエスト防止）
+		updatedCache, err := readCache(cacheFile)
+		if err != nil {
+			t.Fatalf("failed to read updated cache: %v", err)
+		}
+		if updatedCache.CachedAt <= staleCache.CachedAt {
+			t.Error("CachedAt should be updated to prevent immediate re-request")
+		}
+	})
+
+	t.Run("returns error on 429 when no cache exists", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+		// キャッシュファイルを作成しない
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusTooManyRequests)
+		}))
+		defer server.Close()
+
+		sl := NewStatusLine(
+			WithHTTPClient(server.Client()),
+			WithAccessTokenFunc(func() (string, error) {
+				return "test-token", nil
+			}),
+			WithHistoryModTimeFunc(func() (time.Time, error) {
+				return time.Time{}, os.ErrNotExist
+			}),
+		)
+
+		_, err := sl.getCachedOrFetch(cacheFile, server.URL)
+		if err == nil {
+			t.Error("getCachedOrFetch should fail on 429 when no cache exists")
+		}
+	})
+
+	t.Run("returns error on 429 when cache has empty ResetsAt", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+
+		// ResetsAt が空のキャッシュ
+		emptyCache := &CacheData{
+			ResetsAt:    "",
+			Utilization: 0.0,
+			CachedAt:    time.Now().Unix() - 300,
+		}
+		if err := saveCache(cacheFile, emptyCache); err != nil {
+			t.Fatalf("failed to save cache: %v", err)
+		}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusTooManyRequests)
+		}))
+		defer server.Close()
+
+		sl := NewStatusLine(
+			WithHTTPClient(server.Client()),
+			WithAccessTokenFunc(func() (string, error) {
+				return "test-token", nil
+			}),
+			WithHistoryModTimeFunc(func() (time.Time, error) {
+				return time.Time{}, os.ErrNotExist
+			}),
+		)
+
+		_, err := sl.getCachedOrFetch(cacheFile, server.URL)
+		if err == nil {
+			t.Error("getCachedOrFetch should fail on 429 when cache has empty ResetsAt")
 		}
 	})
 }
@@ -1300,6 +1419,97 @@ func TestFetchFromAPI(t *testing.T) {
 			t.Error("fetchFromAPI should fail on token error")
 		}
 	})
+
+	t.Run("429 with Retry-After header returns RateLimitError", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Retry-After", "30")
+			w.WriteHeader(http.StatusTooManyRequests)
+		}))
+		defer server.Close()
+
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+
+		sl := NewStatusLine(
+			WithHTTPClient(server.Client()),
+			WithAccessTokenFunc(func() (string, error) {
+				return "test-token", nil
+			}),
+		)
+
+		_, err := sl.fetchFromAPI(cacheFile, server.URL)
+		if err == nil {
+			t.Fatal("fetchFromAPI should fail on 429")
+		}
+
+		var rateLimitErr *RateLimitError
+		if !errors.As(err, &rateLimitErr) {
+			t.Fatalf("error should be RateLimitError, got: %T", err)
+		}
+		if rateLimitErr.RetryAfter != 30*time.Second {
+			t.Errorf("RetryAfter = %v, expected 30s", rateLimitErr.RetryAfter)
+		}
+	})
+
+	t.Run("429 without Retry-After header uses default", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusTooManyRequests)
+		}))
+		defer server.Close()
+
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+
+		sl := NewStatusLine(
+			WithHTTPClient(server.Client()),
+			WithAccessTokenFunc(func() (string, error) {
+				return "test-token", nil
+			}),
+		)
+
+		_, err := sl.fetchFromAPI(cacheFile, server.URL)
+		if err == nil {
+			t.Fatal("fetchFromAPI should fail on 429")
+		}
+
+		var rateLimitErr *RateLimitError
+		if !errors.As(err, &rateLimitErr) {
+			t.Fatalf("error should be RateLimitError, got: %T", err)
+		}
+		if rateLimitErr.RetryAfter != defaultRetryAfter {
+			t.Errorf("RetryAfter = %v, expected %v", rateLimitErr.RetryAfter, defaultRetryAfter)
+		}
+	})
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected time.Duration
+	}{
+		{"valid seconds", "30", 30 * time.Second},
+		{"empty string", "", defaultRetryAfter},
+		{"invalid value", "invalid", defaultRetryAfter},
+		{"zero", "0", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := parseRetryAfter(tt.value)
+			if result != tt.expected {
+				t.Errorf("parseRetryAfter(%q) = %v, expected %v", tt.value, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestRateLimitError(t *testing.T) {
+	err := &RateLimitError{RetryAfter: 30 * time.Second}
+	expected := "rate limited: retry after 30s"
+	if err.Error() != expected {
+		t.Errorf("Error() = %q, expected %q", err.Error(), expected)
+	}
 }
 
 func TestNewStatusLine(t *testing.T) {

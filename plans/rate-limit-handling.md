@@ -1,14 +1,15 @@
-# Rate Limit (429) ハンドリング
+# Rate Limit (429) ハンドリングと minFetchInterval 調整
 
 ## 概要
 
-APIが429 (Rate Limit) を返した場合に、期限切れキャッシュへのフォールバックと適切なバックオフを行う機能を追加する。
+APIが429 (Rate Limit) を返した場合に、期限切れキャッシュへのフォールバックと適切なバックオフを行う機能を追加する。併せて、`minFetchInterval` を 30秒 から 45秒 に引き上げ、Rate Limit の発生頻度を低減する。
 
 ## 背景
 
 - 現状: APIが非200ステータスを返すと一律エラーとして扱い、使用率 0% のデフォルト値を表示する
 - 問題: Rate Limit 時に 0% が表示されるのは誤解を招く。実際には使用率が高いからこそ Rate Limit がかかっている可能性が高い
-- 解決: 429 を受けた場合、期限切れキャッシュにフォールバックし、`Retry-After` ヘッダーを尊重してバックオフする
+- 問題: `minFetchInterval` が 30秒 では Rate Limit に当たるケースが観測されている
+- 解決: 429 を受けた場合、期限切れキャッシュにフォールバックし、`Retry-After` ヘッダーを尊重してバックオフする。通常時も `minFetchInterval` を 45秒 に引き上げて API 負荷を軽減する
 
 ## 現状のコード
 
@@ -51,7 +52,27 @@ if err != nil {
 
 ## 実装計画
 
-### 1. `RateLimitError` 型の追加
+### 1. `minFetchInterval` の変更
+
+```go
+// 変更前
+minFetchInterval = 30 * time.Second
+
+// 変更後
+minFetchInterval = 45 * time.Second
+```
+
+#### 変更の根拠
+
+| 項目                                                      | 30秒      | 45秒     |
+| --------------------------------------------------------- | --------- | -------- |
+| 頻繁使用時（30秒に1回プロンプト）の1時間あたりAPI呼び出し | 最大120回 | 最大80回 |
+| 通常使用時（5分に1回プロンプト）の体感                    | 変化なし  | 変化なし |
+| Rate Limit 発生リスク                                     | 高め      | 低減     |
+
+通常使用時はどちらも `pollInterval`（2分）による無効化が先に効くため体感差はない。頻繁使用時のみ差が出る。
+
+### 2. `RateLimitError` 型の追加
 
 Rate Limit を他のエラーと区別するための専用エラー型を定義する。
 
@@ -66,7 +87,7 @@ func (e *RateLimitError) Error() string {
 }
 ```
 
-### 2. `fetchFromAPI()` の修正
+### 3. `fetchFromAPI()` の修正
 
 429 レスポンスを検出し、`Retry-After` ヘッダーをパースして `RateLimitError` を返す。
 
@@ -81,7 +102,7 @@ if resp.StatusCode != http.StatusOK {
 }
 ```
 
-### 3. `parseRetryAfter()` 関数の追加
+### 4. `parseRetryAfter()` 関数の追加
 
 `Retry-After` ヘッダーを秒数としてパースする。ヘッダーが無い場合やパース失敗時はデフォルト値（60秒）を返す。
 
@@ -102,7 +123,7 @@ func parseRetryAfter(value string) time.Duration {
 }
 ```
 
-### 4. `getCachedOrFetch()` の修正
+### 5. `getCachedOrFetch()` の修正
 
 Rate Limit エラー時に期限切れキャッシュにフォールバックし、キャッシュの `CachedAt` を更新して連続リクエストを防ぐ。
 
@@ -136,7 +157,7 @@ func (sl *StatusLine) getCachedOrFetch(cacheFile string, endpoint string) (*Cach
 }
 ```
 
-### 5. テストケース
+### 6. テストケース
 
 #### `parseRetryAfter` のテスト
 
@@ -191,10 +212,10 @@ isCacheValid() 判定
 
 ## ファイル変更一覧
 
-| ファイル     | 変更内容                                                                                                                               |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
-| main.go      | `RateLimitError` 型追加、`parseRetryAfter()` 追加、`fetchFromAPI()` 修正、`getCachedOrFetch()` 修正、`errors` パッケージの import 追加 |
-| main_test.go | `parseRetryAfter` テスト、429 時の `fetchFromAPI` テスト、フォールバック動作の `getCachedOrFetch` テスト                               |
+| ファイル     | 変更内容                                                                                                                                                                 |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| main.go      | `minFetchInterval` を 45秒に変更、`RateLimitError` 型追加、`parseRetryAfter()` 追加、`fetchFromAPI()` 修正、`getCachedOrFetch()` 修正、`errors` パッケージの import 追加 |
+| main_test.go | `minFetchInterval` 変更に伴う既存テストの調整、`parseRetryAfter` テスト、429 時の `fetchFromAPI` テスト、フォールバック動作の `getCachedOrFetch` テスト                  |
 
 ## 考慮事項
 
@@ -206,8 +227,8 @@ isCacheValid() 判定
 
 ### `CachedAt` 更新の意味
 
-- Rate Limit 時に `CachedAt` を現在時刻に更新することで、`isCacheValid()` の `minFetchInterval`（30秒）が効く
-- これにより最低30秒間は再リクエストを行わない
+- Rate Limit 時に `CachedAt` を現在時刻に更新することで、`isCacheValid()` の `minFetchInterval`（45秒）が効く
+- これにより最低45秒間は再リクエストを行わない
 - `Retry-After` の値を `CachedAt` に直接反映するより単純で、既存のキャッシュ機構と整合性がある
 
 ### フォールバックキャッシュの鮮度
@@ -218,13 +239,15 @@ isCacheValid() 判定
 ## 実装順序
 
 1. テストを作成（TDD）
+   - `minFetchInterval` 変更に伴う既存テストの調整
    - `parseRetryAfter` のテスト
    - `fetchFromAPI` の 429 ハンドリングテスト
    - `getCachedOrFetch` のフォールバックテスト
 2. テスト実行、失敗を確認
-3. `RateLimitError` 型を追加
-4. `parseRetryAfter()` を実装
-5. `fetchFromAPI()` を修正
-6. `getCachedOrFetch()` を修正
-7. テスト実行、成功を確認
-8. 動作確認
+3. `minFetchInterval` を 45秒に変更
+4. `RateLimitError` 型を追加
+5. `parseRetryAfter()` を実装
+6. `fetchFromAPI()` を修正
+7. `getCachedOrFetch()` を修正
+8. テスト実行、成功を確認
+9. 動作確認
