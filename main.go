@@ -95,27 +95,29 @@ func migrateLegacyCache(legacyPath, newPath string) error {
 
 // Config は表示設定を保持する構造体
 type Config struct {
-	ShowAppName    bool `json:"show_app_name"`
-	ShowModel      bool `json:"show_model"`
-	ShowTokens     bool `json:"show_tokens"`
-	Show5hUsage    bool `json:"show_5h_usage"`
-	Show5hResets   bool `json:"show_5h_resets"`
-	ShowWeekUsage  bool `json:"show_week_usage"`
-	ShowWeekResets bool `json:"show_week_resets"`
-	BarWidth       int  `json:"bar_width"`
+	ShowAppName      bool `json:"show_app_name"`
+	ShowModel        bool `json:"show_model"`
+	ShowTokens       bool `json:"show_tokens"`
+	ShowContextUsage bool `json:"show_context_usage"`
+	Show5hUsage      bool `json:"show_5h_usage"`
+	Show5hResets     bool `json:"show_5h_resets"`
+	ShowWeekUsage    bool `json:"show_week_usage"`
+	ShowWeekResets   bool `json:"show_week_resets"`
+	BarWidth         int  `json:"bar_width"`
 }
 
 // defaultConfig はデフォルト設定を返す
 func defaultConfig() *Config {
 	return &Config{
-		ShowAppName:    true,
-		ShowModel:      true,
-		ShowTokens:     true,
-		Show5hUsage:    true,
-		Show5hResets:   true,
-		ShowWeekUsage:  true,
-		ShowWeekResets: true,
-		BarWidth:       20,
+		ShowAppName:      true,
+		ShowModel:        true,
+		ShowTokens:       true,
+		ShowContextUsage: true,
+		Show5hUsage:      true,
+		Show5hResets:     true,
+		ShowWeekUsage:    true,
+		ShowWeekResets:   true,
+		BarWidth:         20,
 	}
 }
 
@@ -241,8 +243,9 @@ type InputData struct {
 		DisplayName string `json:"display_name"`
 	} `json:"model"`
 	ContextWindow struct {
-		TotalInputTokens  int64 `json:"total_input_tokens"`
-		TotalOutputTokens int64 `json:"total_output_tokens"`
+		TotalInputTokens  int64    `json:"total_input_tokens"`
+		TotalOutputTokens int64    `json:"total_output_tokens"`
+		UsedPercentage    *float64 `json:"used_percentage"`
 	} `json:"context_window"`
 }
 
@@ -352,6 +355,13 @@ func (sl *StatusLine) runWithConfig(stdin io.Reader, stdout io.Writer, cacheFile
 	}
 	if cfg.ShowTokens {
 		parts = append(parts, fmt.Sprintf("Total Tokens: %s", totalTokensStr))
+	}
+	if cfg.ShowContextUsage {
+		ctxPct := 0.0
+		if input.ContextWindow.UsedPercentage != nil {
+			ctxPct = *input.ContextWindow.UsedPercentage
+		}
+		parts = append(parts, fmt.Sprintf("ctx: %s", colorizeUsageWithWidth(ctxPct, cfg.BarWidth)))
 	}
 	if cfg.Show5hUsage {
 		parts = append(parts, fmt.Sprintf("5h: %s", fiveHourUsage))

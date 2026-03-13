@@ -1460,6 +1460,140 @@ func TestRunWithConfigUsageWarnings(t *testing.T) {
 	})
 }
 
+func TestContextWindowUsage(t *testing.T) {
+	makeCache := func(tmpDir string) string {
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+		saveCache(cacheFile, &CacheData{
+			ResetsAt:          "2026-01-27T10:00:00Z",
+			Utilization:       30.0,
+			WeeklyUtilization: 10.0,
+			CachedAt:          time.Now().Unix() - 10,
+		})
+		return cacheFile
+	}
+	noopHistoryMod := WithHistoryModTimeFunc(func() (time.Time, error) {
+		return time.Time{}, os.ErrNotExist
+	})
+
+	t.Run("used_percentage is displayed as bar when ShowContextUsage is true", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := makeCache(tmpDir)
+
+		pct := 40.0
+		input := InputData{}
+		input.Model.DisplayName = "Sonnet 4"
+		input.ContextWindow.TotalInputTokens = 1000
+		input.ContextWindow.TotalOutputTokens = 500
+		input.ContextWindow.UsedPercentage = &pct
+		inputJSON, _ := json.Marshal(input)
+
+		stdout := &bytes.Buffer{}
+		sl := NewStatusLine(noopHistoryMod)
+
+		cfg := defaultConfig()
+		cfg.ShowContextUsage = true
+		err := sl.runWithConfig(bytes.NewReader(inputJSON), stdout, cacheFile, cfg)
+		if err != nil {
+			t.Fatalf("runWithConfig failed: %v", err)
+		}
+
+		output := stdout.String()
+		if !strings.Contains(output, "ctx:") {
+			t.Errorf("output should contain 'ctx:', got: %s", output)
+		}
+		if !strings.Contains(output, "40.0%") {
+			t.Errorf("output should contain '40.0%%', got: %s", output)
+		}
+	})
+
+	t.Run("context usage is not displayed when ShowContextUsage is false", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := makeCache(tmpDir)
+
+		pct := 40.0
+		input := InputData{}
+		input.Model.DisplayName = "Sonnet 4"
+		input.ContextWindow.UsedPercentage = &pct
+		inputJSON, _ := json.Marshal(input)
+
+		stdout := &bytes.Buffer{}
+		sl := NewStatusLine(noopHistoryMod)
+
+		cfg := defaultConfig()
+		cfg.ShowContextUsage = false
+		err := sl.runWithConfig(bytes.NewReader(inputJSON), stdout, cacheFile, cfg)
+		if err != nil {
+			t.Fatalf("runWithConfig failed: %v", err)
+		}
+
+		output := stdout.String()
+		if strings.Contains(output, "ctx:") {
+			t.Errorf("output should not contain 'ctx:' when ShowContextUsage is false, got: %s", output)
+		}
+	})
+
+	t.Run("null used_percentage shows 0% bar", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := makeCache(tmpDir)
+
+		input := InputData{}
+		input.Model.DisplayName = "Sonnet 4"
+		// UsedPercentage is nil (null in JSON)
+		inputJSON, _ := json.Marshal(input)
+
+		stdout := &bytes.Buffer{}
+		sl := NewStatusLine(noopHistoryMod)
+
+		cfg := defaultConfig()
+		cfg.ShowContextUsage = true
+		err := sl.runWithConfig(bytes.NewReader(inputJSON), stdout, cacheFile, cfg)
+		if err != nil {
+			t.Fatalf("runWithConfig failed: %v", err)
+		}
+
+		output := stdout.String()
+		if !strings.Contains(output, "ctx:") {
+			t.Errorf("output should contain 'ctx:', got: %s", output)
+		}
+		if !strings.Contains(output, "0.0%") {
+			t.Errorf("output should contain '0.0%%' for null used_percentage, got: %s", output)
+		}
+	})
+
+	t.Run("ShowContextUsage is true by default", func(t *testing.T) {
+		cfg := defaultConfig()
+		if !cfg.ShowContextUsage {
+			t.Error("ShowContextUsage should be true by default")
+		}
+	})
+
+	t.Run("InputData parses used_percentage from JSON", func(t *testing.T) {
+		pct := 55.5
+		raw := `{"context_window":{"total_input_tokens":100,"total_output_tokens":50,"used_percentage":55.5}}`
+		var input InputData
+		if err := json.Unmarshal([]byte(raw), &input); err != nil {
+			t.Fatalf("failed to unmarshal: %v", err)
+		}
+		if input.ContextWindow.UsedPercentage == nil {
+			t.Fatal("UsedPercentage should not be nil")
+		}
+		if *input.ContextWindow.UsedPercentage != pct {
+			t.Errorf("UsedPercentage = %v, want %v", *input.ContextWindow.UsedPercentage, pct)
+		}
+	})
+
+	t.Run("InputData handles null used_percentage", func(t *testing.T) {
+		raw := `{"context_window":{"total_input_tokens":100,"total_output_tokens":50,"used_percentage":null}}`
+		var input InputData
+		if err := json.Unmarshal([]byte(raw), &input); err != nil {
+			t.Fatalf("failed to unmarshal: %v", err)
+		}
+		if input.ContextWindow.UsedPercentage != nil {
+			t.Errorf("UsedPercentage should be nil for null, got: %v", *input.ContextWindow.UsedPercentage)
+		}
+	})
+}
+
 func TestColorizeUsage(t *testing.T) {
 	// バー幅20文字、下方向部分ブロック(▁▂▃▅▆▇)による6段階の小数部表現
 	// 完全ブロック: █, 部分ブロック: ▇(5/6-)▆(4/6-)▅(3/6-)▃(2/6-)▂(1/6-)▁(>0)
