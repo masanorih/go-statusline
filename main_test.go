@@ -2067,6 +2067,367 @@ func TestGetConfigDir(t *testing.T) {
 	})
 }
 
+func TestUnixToISO8601(t *testing.T) {
+	tests := []struct {
+		name     string
+		epoch    int64
+		expected string
+	}{
+		{"valid epoch", 1743580800, "2025-04-02T08:00:00Z"},
+		{"zero returns empty", 0, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := unixToISO8601(tt.epoch)
+			if result != tt.expected {
+				t.Errorf("unixToISO8601(%d) = %s, expected %s", tt.epoch, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestInputDataRateLimitsParsing(t *testing.T) {
+	t.Run("parses rate_limits", func(t *testing.T) {
+		jsonInput := `{
+			"model": {"display_name": "Sonnet 4"},
+			"context_window": {"total_input_tokens": 1000, "total_output_tokens": 500},
+			"rate_limits": {
+				"five_hour": {
+					"used_percentage": 25.0,
+					"resets_at": 1743580800
+				},
+				"seven_day": {
+					"used_percentage": 10.0,
+					"resets_at": 1744185600
+				}
+			}
+		}`
+
+		var input InputData
+		err := json.Unmarshal([]byte(jsonInput), &input)
+		if err != nil {
+			t.Fatalf("failed to parse input: %v", err)
+		}
+
+		if input.RateLimits == nil {
+			t.Fatal("RateLimits should not be nil")
+		}
+		if input.RateLimits.FiveHour == nil {
+			t.Fatal("FiveHour should not be nil")
+		}
+		if input.RateLimits.FiveHour.UsedPercentage != 25.0 {
+			t.Errorf("FiveHour.UsedPercentage = %v, expected 25.0", input.RateLimits.FiveHour.UsedPercentage)
+		}
+		if input.RateLimits.FiveHour.ResetsAt != 1743580800 {
+			t.Errorf("FiveHour.ResetsAt = %d, expected 1743580800", input.RateLimits.FiveHour.ResetsAt)
+		}
+		if input.RateLimits.SevenDay == nil {
+			t.Fatal("SevenDay should not be nil")
+		}
+		if input.RateLimits.SevenDay.UsedPercentage != 10.0 {
+			t.Errorf("SevenDay.UsedPercentage = %v, expected 10.0", input.RateLimits.SevenDay.UsedPercentage)
+		}
+		if input.RateLimits.SevenDay.ResetsAt != 1744185600 {
+			t.Errorf("SevenDay.ResetsAt = %d, expected 1744185600", input.RateLimits.SevenDay.ResetsAt)
+		}
+	})
+
+	t.Run("rate_limits is null", func(t *testing.T) {
+		jsonInput := `{
+			"model": {"display_name": "Sonnet 4"},
+			"context_window": {"total_input_tokens": 1000, "total_output_tokens": 500}
+		}`
+
+		var input InputData
+		err := json.Unmarshal([]byte(jsonInput), &input)
+		if err != nil {
+			t.Fatalf("failed to parse input: %v", err)
+		}
+
+		if input.RateLimits != nil {
+			t.Error("RateLimits should be nil when not present")
+		}
+	})
+
+	t.Run("five_hour only", func(t *testing.T) {
+		jsonInput := `{
+			"model": {"display_name": "Sonnet 4"},
+			"context_window": {"total_input_tokens": 1000, "total_output_tokens": 500},
+			"rate_limits": {
+				"five_hour": {
+					"used_percentage": 30.0,
+					"resets_at": 1743580800
+				}
+			}
+		}`
+
+		var input InputData
+		err := json.Unmarshal([]byte(jsonInput), &input)
+		if err != nil {
+			t.Fatalf("failed to parse input: %v", err)
+		}
+
+		if input.RateLimits == nil {
+			t.Fatal("RateLimits should not be nil")
+		}
+		if input.RateLimits.FiveHour == nil {
+			t.Fatal("FiveHour should not be nil")
+		}
+		if input.RateLimits.SevenDay != nil {
+			t.Error("SevenDay should be nil when not present")
+		}
+	})
+}
+
+func TestInputDataCostParsing(t *testing.T) {
+	t.Run("parses cost", func(t *testing.T) {
+		jsonInput := `{
+			"model": {"display_name": "Sonnet 4"},
+			"context_window": {"total_input_tokens": 1000, "total_output_tokens": 500},
+			"cost": {"total_cost_usd": 0.1234}
+		}`
+
+		var input InputData
+		err := json.Unmarshal([]byte(jsonInput), &input)
+		if err != nil {
+			t.Fatalf("failed to parse input: %v", err)
+		}
+
+		if input.Cost == nil {
+			t.Fatal("Cost should not be nil")
+		}
+		if input.Cost.TotalCostUSD != 0.1234 {
+			t.Errorf("TotalCostUSD = %v, expected 0.1234", input.Cost.TotalCostUSD)
+		}
+	})
+
+	t.Run("cost is null", func(t *testing.T) {
+		jsonInput := `{
+			"model": {"display_name": "Sonnet 4"},
+			"context_window": {"total_input_tokens": 1000, "total_output_tokens": 500}
+		}`
+
+		var input InputData
+		err := json.Unmarshal([]byte(jsonInput), &input)
+		if err != nil {
+			t.Fatalf("failed to parse input: %v", err)
+		}
+
+		if input.Cost != nil {
+			t.Error("Cost should be nil when not present")
+		}
+	})
+}
+
+func TestRunWithStdinRateLimits(t *testing.T) {
+	noopHistoryMod := WithHistoryModTimeFunc(func() (time.Time, error) {
+		return time.Time{}, os.ErrNotExist
+	})
+
+	t.Run("uses stdin rate_limits when available (no API call)", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+
+		// rate_limits を含む stdin JSON
+		inputJSON := `{
+			"model": {"display_name": "Sonnet 4"},
+			"context_window": {"total_input_tokens": 1000, "total_output_tokens": 500},
+			"rate_limits": {
+				"five_hour": {
+					"used_percentage": 42.5,
+					"resets_at": 1743580800
+				},
+				"seven_day": {
+					"used_percentage": 15.0,
+					"resets_at": 1744185600
+				}
+			}
+		}`
+
+		stdin := strings.NewReader(inputJSON)
+		stdout := &bytes.Buffer{}
+
+		apiCalled := false
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiCalled = true
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(APIResponse{})
+		}))
+		defer server.Close()
+
+		sl := NewStatusLine(
+			noopHistoryMod,
+			WithHTTPClient(server.Client()),
+			WithAccessTokenFunc(func() (string, error) {
+				return "test-token", nil
+			}),
+		)
+
+		cfg := defaultConfig()
+		err := sl.runWithConfig(stdin, stdout, cacheFile, cfg)
+		if err != nil {
+			t.Fatalf("runWithConfig failed: %v", err)
+		}
+
+		output := stdout.String()
+
+		// stdin の値が表示されることを確認
+		if !strings.Contains(output, "42.5%") {
+			t.Errorf("output should contain 5h usage from stdin (42.5%%), got: %s", output)
+		}
+		if !strings.Contains(output, "15.0%") {
+			t.Errorf("output should contain weekly usage from stdin (15.0%%), got: %s", output)
+		}
+
+		// API が呼ばれていないことを確認
+		if apiCalled {
+			t.Error("API should not be called when stdin provides rate_limits")
+		}
+	})
+
+	t.Run("falls back to cache when stdin has no rate_limits", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+
+		// 有効なキャッシュを事前に用意
+		saveCache(cacheFile, &CacheData{
+			ResetsAt:          "2025-04-02T12:00:00Z",
+			Utilization:       60.0,
+			WeeklyUtilization: 25.0,
+			WeeklyResetsAt:    "2025-04-09T12:00:00Z",
+			CachedAt:          time.Now().Unix() - 10,
+		})
+
+		inputJSON := `{
+			"model": {"display_name": "Sonnet 4"},
+			"context_window": {"total_input_tokens": 1000, "total_output_tokens": 500}
+		}`
+
+		stdin := strings.NewReader(inputJSON)
+		stdout := &bytes.Buffer{}
+
+		sl := NewStatusLine(noopHistoryMod)
+
+		cfg := defaultConfig()
+		err := sl.runWithConfig(stdin, stdout, cacheFile, cfg)
+		if err != nil {
+			t.Fatalf("runWithConfig failed: %v", err)
+		}
+
+		output := stdout.String()
+
+		// キャッシュの値が表示されることを確認
+		if !strings.Contains(output, "60.0%") {
+			t.Errorf("output should contain 5h usage from cache (60.0%%), got: %s", output)
+		}
+		if !strings.Contains(output, "25.0%") {
+			t.Errorf("output should contain weekly usage from cache (25.0%%), got: %s", output)
+		}
+	})
+}
+
+func TestRunWithCostDisplay(t *testing.T) {
+	noopHistoryMod := WithHistoryModTimeFunc(func() (time.Time, error) {
+		return time.Time{}, os.ErrNotExist
+	})
+
+	makeCache := func(tmpDir string) string {
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+		saveCache(cacheFile, &CacheData{
+			ResetsAt:          "2026-01-27T10:00:00Z",
+			Utilization:       30.0,
+			WeeklyUtilization: 10.0,
+			CachedAt:          time.Now().Unix() - 10,
+		})
+		return cacheFile
+	}
+
+	t.Run("shows cost when ShowCost is true and cost is present", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := makeCache(tmpDir)
+
+		inputJSON := `{
+			"model": {"display_name": "Sonnet 4"},
+			"context_window": {"total_input_tokens": 1000, "total_output_tokens": 500},
+			"cost": {"total_cost_usd": 0.1234}
+		}`
+
+		stdout := &bytes.Buffer{}
+		sl := NewStatusLine(noopHistoryMod)
+
+		cfg := defaultConfig()
+		cfg.ShowCost = true
+		err := sl.runWithConfig(strings.NewReader(inputJSON), stdout, cacheFile, cfg)
+		if err != nil {
+			t.Fatalf("runWithConfig failed: %v", err)
+		}
+
+		output := stdout.String()
+		if !strings.Contains(output, "cost: $0.1234") {
+			t.Errorf("output should contain 'cost: $0.1234', got: %s", output)
+		}
+	})
+
+	t.Run("hides cost when ShowCost is false", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := makeCache(tmpDir)
+
+		inputJSON := `{
+			"model": {"display_name": "Sonnet 4"},
+			"context_window": {"total_input_tokens": 1000, "total_output_tokens": 500},
+			"cost": {"total_cost_usd": 0.1234}
+		}`
+
+		stdout := &bytes.Buffer{}
+		sl := NewStatusLine(noopHistoryMod)
+
+		cfg := defaultConfig()
+		cfg.ShowCost = false
+		err := sl.runWithConfig(strings.NewReader(inputJSON), stdout, cacheFile, cfg)
+		if err != nil {
+			t.Fatalf("runWithConfig failed: %v", err)
+		}
+
+		output := stdout.String()
+		if strings.Contains(output, "cost:") {
+			t.Errorf("output should not contain 'cost:' when ShowCost is false, got: %s", output)
+		}
+	})
+
+	t.Run("hides cost when cost is null", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cacheFile := makeCache(tmpDir)
+
+		inputJSON := `{
+			"model": {"display_name": "Sonnet 4"},
+			"context_window": {"total_input_tokens": 1000, "total_output_tokens": 500}
+		}`
+
+		stdout := &bytes.Buffer{}
+		sl := NewStatusLine(noopHistoryMod)
+
+		cfg := defaultConfig()
+		cfg.ShowCost = true
+		err := sl.runWithConfig(strings.NewReader(inputJSON), stdout, cacheFile, cfg)
+		if err != nil {
+			t.Fatalf("runWithConfig failed: %v", err)
+		}
+
+		output := stdout.String()
+		if strings.Contains(output, "cost:") {
+			t.Errorf("output should not contain 'cost:' when cost is null, got: %s", output)
+		}
+	})
+
+	t.Run("ShowCost is false by default", func(t *testing.T) {
+		cfg := defaultConfig()
+		if cfg.ShowCost {
+			t.Error("ShowCost should be false by default")
+		}
+	})
+}
+
 func TestMigrateLegacyCache(t *testing.T) {
 	t.Run("migrates legacy cache to new location", func(t *testing.T) {
 		tmpDir := t.TempDir()

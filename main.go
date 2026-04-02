@@ -105,6 +105,7 @@ type Config struct {
 	Show5hResets     bool `json:"show_5h_resets"`
 	ShowWeekUsage    bool `json:"show_week_usage"`
 	ShowWeekResets   bool `json:"show_week_resets"`
+	ShowCost         bool `json:"show_cost"`
 	BarWidth         int  `json:"bar_width"`
 }
 
@@ -249,6 +250,19 @@ type InputData struct {
 		TotalOutputTokens int64    `json:"total_output_tokens"`
 		UsedPercentage    *float64 `json:"used_percentage"`
 	} `json:"context_window"`
+	RateLimits *struct {
+		FiveHour *struct {
+			UsedPercentage float64 `json:"used_percentage"`
+			ResetsAt       int64   `json:"resets_at"`
+		} `json:"five_hour"`
+		SevenDay *struct {
+			UsedPercentage float64 `json:"used_percentage"`
+			ResetsAt       int64   `json:"resets_at"`
+		} `json:"seven_day"`
+	} `json:"rate_limits"`
+	Cost *struct {
+		TotalCostUSD float64 `json:"total_cost_usd"`
+	} `json:"cost"`
 }
 
 // CacheData はキャッシュされる使用状況データ
@@ -336,22 +350,39 @@ func (sl *StatusLine) runWithConfig(stdin io.Reader, stdout io.Writer, cacheFile
 	totalTokens := input.ContextWindow.TotalInputTokens + input.ContextWindow.TotalOutputTokens
 	totalTokensStr := formatTokens(totalTokens)
 
-	// キャッシュファイルのパスを取得
-	if cacheFile == "" {
-		cacheFile = getCacheFilePath()
+	// 使用率データを取得
+	// stdin に rate_limits がある場合はそれを優先し、ない場合は API にフォールバック
+	var cache *CacheData
 
-		// 旧キャッシュファイルからの移行
-		legacyPath := getLegacyCacheFilePath()
-		if err := migrateLegacyCache(legacyPath, cacheFile); err != nil {
-			fmt.Fprintf(sl.stderr, "warning: failed to migrate cache: %v\n", err)
+	if input.RateLimits != nil && input.RateLimits.FiveHour != nil {
+		// stdin から直接取得
+		cache = &CacheData{
+			Utilization: input.RateLimits.FiveHour.UsedPercentage,
+			ResetsAt:    unixToISO8601(input.RateLimits.FiveHour.ResetsAt),
 		}
-	}
+		if input.RateLimits.SevenDay != nil {
+			cache.WeeklyUtilization = input.RateLimits.SevenDay.UsedPercentage
+			cache.WeeklyResetsAt = unixToISO8601(input.RateLimits.SevenDay.ResetsAt)
+		}
+	} else {
+		// キャッシュファイルのパスを取得
+		if cacheFile == "" {
+			cacheFile = getCacheFilePath()
 
-	// キャッシュの有効性をチェックし、必要に応じて取得
-	cache, err := sl.getCachedOrFetch(cacheFile, apiEndpoint)
-	if err != nil {
-		// デフォルト値で継続
-		cache = &CacheData{Utilization: 0.0}
+			// 旧キャッシュファイルからの移行
+			legacyPath := getLegacyCacheFilePath()
+			if err := migrateLegacyCache(legacyPath, cacheFile); err != nil {
+				fmt.Fprintf(sl.stderr, "warning: failed to migrate cache: %v\n", err)
+			}
+		}
+
+		// キャッシュの有効性をチェックし、必要に応じて取得
+		var err error
+		cache, err = sl.getCachedOrFetch(cacheFile, apiEndpoint)
+		if err != nil {
+			// デフォルト値で継続
+			cache = &CacheData{Utilization: 0.0}
+		}
 	}
 
 	// リセット時刻をフォーマット
@@ -409,11 +440,23 @@ func (sl *StatusLine) runWithConfig(stdin io.Reader, stdout io.Writer, cacheFile
 			parts = append(parts, "resets: N/A")
 		}
 	}
+	if cfg.ShowCost && input.Cost != nil {
+		parts = append(parts, fmt.Sprintf("cost: $%.4f", input.Cost.TotalCostUSD))
+	}
 
 	// 出力
 	fmt.Fprintf(stdout, "%s\n", strings.Join(parts, " | "))
 
 	return nil
+}
+
+// unixToISO8601 は Unix エポック秒を ISO8601 (RFC3339) 文字列に変換する
+// 0 の場合は空文字列を返す
+func unixToISO8601(epoch int64) string {
+	if epoch == 0 {
+		return ""
+	}
+	return time.Unix(epoch, 0).UTC().Format(time.RFC3339)
 }
 
 // formatTokens はトークン数をフォーマット（1000以上は"k"単位）
