@@ -823,7 +823,7 @@ func formatResetTime(resetsAt string) string {
 	return localTime.Format("15:04")
 }
 
-// formatResetTimeWithDate はリセット時刻をMM/DD HH:MM形式にフォーマット
+// formatResetTimeWithDate はリセット時刻をMM/DD(Day) HH:MM形式にフォーマット
 func formatResetTimeWithDate(resetsAt string) string {
 	if resetsAt == "" {
 		return ""
@@ -838,7 +838,7 @@ func formatResetTimeWithDate(resetsAt string) string {
 	// 分単位で切り上げ
 	t = roundToNearestMinute(t)
 
-	// ローカル時刻に変換してフォーマット（MM/DD HH:MM）
+	// ローカル時刻に変換してフォーマット（MM/DD(Day) HH:MM）
 	localTime := t.Local()
-	return localTime.Format("01/02 15:04")
+	return localTime.Format("01/02(Mon) 15:04")
 }

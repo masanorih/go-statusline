@@ -323,19 +323,32 @@ func TestFormatResetTimeWithDate(t *testing.T) {
 			if !tt.wantEmpty && result == "" {
 				t.Errorf("formatResetTimeWithDate(%s) returned empty, expected non-empty", tt.resetsAt)
 			}
-			// フォーマット形式のチェック: MM/DD HH:MM (例: 02/05 19:30)
+			// フォーマット形式のチェック: MM/DD(Day) HH:MM (例: 02/05(Thu) 19:30)
 			if !tt.wantEmpty && result != "" {
-				// 長さは 11 文字 (MM/DD HH:MM)
-				if len(result) != 11 {
-					t.Errorf("formatResetTimeWithDate(%s) = %s, expected format MM/DD HH:MM (length 11)", tt.resetsAt, result)
+				// 長さは 16 文字 (MM/DD(Day) HH:MM)
+				if len(result) != 16 {
+					t.Errorf("formatResetTimeWithDate(%s) = %s, expected format MM/DD(Day) HH:MM (length 16)", tt.resetsAt, result)
 				}
-				// スラッシュとスペースの位置をチェック
-				if result[2] != '/' || result[5] != ' ' || result[8] != ':' {
-					t.Errorf("formatResetTimeWithDate(%s) = %s, expected format MM/DD HH:MM", tt.resetsAt, result)
+				// 区切り文字の位置をチェック
+				if result[2] != '/' || result[5] != '(' || result[9] != ')' || result[10] != ' ' || result[13] != ':' {
+					t.Errorf("formatResetTimeWithDate(%s) = %s, expected format MM/DD(Day) HH:MM", tt.resetsAt, result)
 				}
 			}
 		})
 	}
+
+	t.Run("contains correct day of week", func(t *testing.T) {
+		// 2026-04-29 はWednesday
+		// UTC で 2026-04-29T03:00:00Z はローカル時刻でも Apr 29 (タイムゾーン依存)
+		// テストの安定性のため、ローカル時刻で曜日を計算して検証する
+		input := "2026-04-29T12:00:00Z"
+		result := formatResetTimeWithDate(input)
+		t_, _ := time.Parse(time.RFC3339, input)
+		expectedDay := t_.Local().Format("Mon")
+		if !strings.Contains(result, "("+expectedDay+")") {
+			t.Errorf("formatResetTimeWithDate(%s) = %s, expected to contain (%s)", input, result, expectedDay)
+		}
+	})
 }
 
 func TestCacheOperations(t *testing.T) {
