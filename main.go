@@ -106,6 +106,9 @@ type Config struct {
 	ShowWeekUsage    bool `json:"show_week_usage"`
 	ShowWeekResets   bool `json:"show_week_resets"`
 	ShowCost         bool `json:"show_cost"`
+	ShowEffort       bool `json:"show_effort"`
+	ShowThinking     bool `json:"show_thinking"`
+	ShowOutputStyle  bool `json:"show_output_style"`
 	BarWidth         int  `json:"bar_width"`
 }
 
@@ -263,15 +266,24 @@ type InputData struct {
 	Cost *struct {
 		TotalCostUSD float64 `json:"total_cost_usd"`
 	} `json:"cost"`
+	Effort *struct {
+		Level string `json:"level"`
+	} `json:"effort"`
+	Thinking *struct {
+		Enabled bool `json:"enabled"`
+	} `json:"thinking"`
+	OutputStyle *struct {
+		Name string `json:"name"`
+	} `json:"output_style"`
 }
 
 // CacheData はキャッシュされる使用状況データ
 type CacheData struct {
-	ResetsAt          string  `json:"resets_at"`           // 5時間リセット時刻（ISO8601形式）
-	Utilization       float64 `json:"utilization"`         // 5時間使用率（0-100）
-	WeeklyUtilization float64 `json:"weekly_utilization"`  // 週間使用率（0-100）
-	WeeklyResetsAt    string  `json:"weekly_resets_at"`    // 週間リセット時刻（ISO8601形式）
-	CachedAt          int64   `json:"cached_at"`           // キャッシュ作成時刻（Unix時刻）
+	ResetsAt          string  `json:"resets_at"`          // 5時間リセット時刻（ISO8601形式）
+	Utilization       float64 `json:"utilization"`        // 5時間使用率（0-100）
+	WeeklyUtilization float64 `json:"weekly_utilization"` // 週間使用率（0-100）
+	WeeklyResetsAt    string  `json:"weekly_resets_at"`   // 週間リセット時刻（ISO8601形式）
+	CachedAt          int64   `json:"cached_at"`          // キャッシュ作成時刻（Unix時刻）
 }
 
 // Credentials は OAuth 認証情報
@@ -408,7 +420,17 @@ func (sl *StatusLine) runWithConfig(stdin io.Reader, stdout io.Writer, cacheFile
 		parts = append(parts, "go-statusline")
 	}
 	if cfg.ShowModel {
-		parts = append(parts, fmt.Sprintf("Model: %s", input.Model.DisplayName))
+		modelStr := input.Model.DisplayName
+		if cfg.ShowEffort && input.Effort != nil && input.Effort.Level != "" {
+			modelStr = fmt.Sprintf("%s - %s", modelStr, input.Effort.Level)
+		}
+		parts = append(parts, fmt.Sprintf("Model: %s", modelStr))
+	}
+	if cfg.ShowThinking && input.Thinking != nil && input.Thinking.Enabled {
+		parts = append(parts, "thinking")
+	}
+	if cfg.ShowOutputStyle && input.OutputStyle != nil && input.OutputStyle.Name != "" {
+		parts = append(parts, fmt.Sprintf("style: %s", input.OutputStyle.Name))
 	}
 	if cfg.ShowTokens {
 		parts = append(parts, fmt.Sprintf("Total Tokens: %s", totalTokensStr))

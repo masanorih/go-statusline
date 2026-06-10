@@ -288,8 +288,8 @@ func TestFormatResetTime(t *testing.T) {
 
 func TestFormatResetTimeWithDate(t *testing.T) {
 	tests := []struct {
-		name     string
-		resetsAt string
+		name      string
+		resetsAt  string
 		wantEmpty bool
 	}{
 		{
@@ -1828,30 +1828,30 @@ func TestColorizeUsage(t *testing.T) {
 	}{
 		// 部分ブロック動作確認 (0-5%)
 		{"0%は緑でバー空", 0.0, "\033[32m0.0% [                    ]\033[0m"},
-		{"1%は緑で▂", 1.0, "\033[32m1.0% [▂                   ]\033[0m"},             // 0.2 >= 1/6
-		{"2%は緑で▃", 2.0, "\033[32m2.0% [▃                   ]\033[0m"},             // 0.4 >= 2/6
-		{"3%は緑で▅", 3.0, "\033[32m3.0% [▅                   ]\033[0m"},             // 0.6 >= 3/6
-		{"4%は緑で▆", 4.0, "\033[32m4.0% [▆                   ]\033[0m"},             // 0.8 >= 4/6
-		{"5%は緑で█1文字", 5.0, "\033[32m5.0% [█                   ]\033[0m"},               // 1.0 -> filled=1
+		{"1%は緑で▂", 1.0, "\033[32m1.0% [▂                   ]\033[0m"},    // 0.2 >= 1/6
+		{"2%は緑で▃", 2.0, "\033[32m2.0% [▃                   ]\033[0m"},    // 0.4 >= 2/6
+		{"3%は緑で▅", 3.0, "\033[32m3.0% [▅                   ]\033[0m"},    // 0.6 >= 3/6
+		{"4%は緑で▆", 4.0, "\033[32m4.0% [▆                   ]\033[0m"},    // 0.8 >= 4/6
+		{"5%は緑で█1文字", 5.0, "\033[32m5.0% [█                   ]\033[0m"}, // 1.0 -> filled=1
 
 		// 境界値確認
-		{"24.9%は緑でバー4文字+▇", 24.9, "\033[32m24.9% [████▇               ]\033[0m"},      // 4.98 -> filled=4, fraction=0.98
-		{"25%は黄色でバー5文字", 25.0, "\033[33m25.0% [█████               ]\033[0m"},        // 5.0 -> filled=5, fraction=0.0
-		{"33%は黄色でバー6文字+▅", 33.0, "\033[33m33.0% [██████▅             ]\033[0m"},      // 6.6 -> filled=6, fraction=0.6
-		{"37%は黄色でバー7文字+▃", 37.0, "\033[33m37.0% [███████▃            ]\033[0m"},      // 7.4 -> filled=7, fraction=0.4
-		{"49.9%は黄色でバー9文字+▇", 49.9, "\033[33m49.9% [█████████▇          ]\033[0m"},    // 9.98 -> filled=9, fraction=0.98
-		{"50%はオレンジでバー10文字", 50.0, "\033[38;5;208m50.0% [██████████          ]\033[0m"}, // 10.0 -> filled=10, fraction=0.0
-		{"67%はオレンジでバー13文字+▃", 67.0, "\033[38;5;208m67.0% [█████████████▃      ]\033[0m"}, // 13.4 -> filled=13, fraction=0.4
+		{"24.9%は緑でバー4文字+▇", 24.9, "\033[32m24.9% [████▇               ]\033[0m"},           // 4.98 -> filled=4, fraction=0.98
+		{"25%は黄色でバー5文字", 25.0, "\033[33m25.0% [█████               ]\033[0m"},              // 5.0 -> filled=5, fraction=0.0
+		{"33%は黄色でバー6文字+▅", 33.0, "\033[33m33.0% [██████▅             ]\033[0m"},            // 6.6 -> filled=6, fraction=0.6
+		{"37%は黄色でバー7文字+▃", 37.0, "\033[33m37.0% [███████▃            ]\033[0m"},            // 7.4 -> filled=7, fraction=0.4
+		{"49.9%は黄色でバー9文字+▇", 49.9, "\033[33m49.9% [█████████▇          ]\033[0m"},          // 9.98 -> filled=9, fraction=0.98
+		{"50%はオレンジでバー10文字", 50.0, "\033[38;5;208m50.0% [██████████          ]\033[0m"},     // 10.0 -> filled=10, fraction=0.0
+		{"67%はオレンジでバー13文字+▃", 67.0, "\033[38;5;208m67.0% [█████████████▃      ]\033[0m"},   // 13.4 -> filled=13, fraction=0.4
 		{"74.9%はオレンジでバー14文字+▇", 74.9, "\033[38;5;208m74.9% [██████████████▇     ]\033[0m"}, // 14.98 -> filled=14, fraction=0.98
-		{"75%は赤でバー15文字", 75.0, "\033[31m75.0% [███████████████     ]\033[0m"},        // 15.0 -> filled=15, fraction=0.0
-		{"88%は赤でバー17文字+▅", 88.0, "\033[31m88.0% [█████████████████▅  ]\033[0m"},      // 17.6 -> filled=17, fraction=0.6
-		{"99%は赤でバー19文字+▆", 99.0, "\033[31m99.0% [███████████████████▆]\033[0m"},      // 19.8 -> filled=19, fraction=0.8
-		{"99.9%は赤でバー19文字+▇", 99.9, "\033[31m99.9% [███████████████████▇]\033[0m"},    // 19.98 -> filled=19, fraction=0.98
-		{"100%は赤でバー20文字", 100.0, "\033[31m100.0% [████████████████████]\033[0m"},     // 20.0 -> filled=20
+		{"75%は赤でバー15文字", 75.0, "\033[31m75.0% [███████████████     ]\033[0m"},              // 15.0 -> filled=15, fraction=0.0
+		{"88%は赤でバー17文字+▅", 88.0, "\033[31m88.0% [█████████████████▅  ]\033[0m"},            // 17.6 -> filled=17, fraction=0.6
+		{"99%は赤でバー19文字+▆", 99.0, "\033[31m99.0% [███████████████████▆]\033[0m"},            // 19.8 -> filled=19, fraction=0.8
+		{"99.9%は赤でバー19文字+▇", 99.9, "\033[31m99.9% [███████████████████▇]\033[0m"},          // 19.98 -> filled=19, fraction=0.98
+		{"100%は赤でバー20文字", 100.0, "\033[31m100.0% [████████████████████]\033[0m"},           // 20.0 -> filled=20
 
 		// エッジケース
 		{"105%は赤でバー20文字(上限)", 105.0, "\033[31m105.0% [████████████████████]\033[0m"}, // 上限クリップ
-		{"-5%は緑でバー空(下限)", -5.0, "\033[32m-5.0% [                    ]\033[0m"},        // 下限クリップ
+		{"-5%は緑でバー空(下限)", -5.0, "\033[32m-5.0% [                    ]\033[0m"},       // 下限クリップ
 	}
 
 	for _, tt := range tests {
@@ -2523,6 +2523,225 @@ func TestMigrateLegacyCache(t *testing.T) {
 		// 旧ファイルもそのまま残っていることを確認
 		if _, err := os.Stat(legacyPath); os.IsNotExist(err) {
 			t.Error("legacy file should remain when new file already exists")
+		}
+	})
+}
+
+func TestInputDataEffortThinkingStyleParsing(t *testing.T) {
+	t.Run("parses effort, thinking, output_style", func(t *testing.T) {
+		jsonInput := `{
+			"model": {"display_name": "Opus 4.8"},
+			"effort": {"level": "high"},
+			"thinking": {"enabled": true},
+			"output_style": {"name": "default"}
+		}`
+
+		var input InputData
+		if err := json.Unmarshal([]byte(jsonInput), &input); err != nil {
+			t.Fatalf("failed to parse input: %v", err)
+		}
+
+		if input.Effort == nil {
+			t.Fatal("Effort should not be nil")
+		}
+		if input.Effort.Level != "high" {
+			t.Errorf("Effort.Level = %q, expected \"high\"", input.Effort.Level)
+		}
+		if input.Thinking == nil {
+			t.Fatal("Thinking should not be nil")
+		}
+		if !input.Thinking.Enabled {
+			t.Error("Thinking.Enabled should be true")
+		}
+		if input.OutputStyle == nil {
+			t.Fatal("OutputStyle should not be nil")
+		}
+		if input.OutputStyle.Name != "default" {
+			t.Errorf("OutputStyle.Name = %q, expected \"default\"", input.OutputStyle.Name)
+		}
+	})
+
+	t.Run("thinking enabled false", func(t *testing.T) {
+		jsonInput := `{
+			"model": {"display_name": "Opus 4.8"},
+			"thinking": {"enabled": false}
+		}`
+
+		var input InputData
+		if err := json.Unmarshal([]byte(jsonInput), &input); err != nil {
+			t.Fatalf("failed to parse input: %v", err)
+		}
+
+		if input.Thinking == nil {
+			t.Fatal("Thinking should not be nil")
+		}
+		if input.Thinking.Enabled {
+			t.Error("Thinking.Enabled should be false")
+		}
+	})
+
+	t.Run("fields are nil when absent", func(t *testing.T) {
+		jsonInput := `{
+			"model": {"display_name": "Opus 4.8"}
+		}`
+
+		var input InputData
+		if err := json.Unmarshal([]byte(jsonInput), &input); err != nil {
+			t.Fatalf("failed to parse input: %v", err)
+		}
+
+		if input.Effort != nil {
+			t.Error("Effort should be nil when not present")
+		}
+		if input.Thinking != nil {
+			t.Error("Thinking should be nil when not present")
+		}
+		if input.OutputStyle != nil {
+			t.Error("OutputStyle should be nil when not present")
+		}
+	})
+}
+
+func TestRunWithEffortThinkingStyleDisplay(t *testing.T) {
+	noopHistoryMod := WithHistoryModTimeFunc(func() (time.Time, error) {
+		return time.Time{}, os.ErrNotExist
+	})
+
+	makeCache := func(tmpDir string) string {
+		cacheFile := filepath.Join(tmpDir, "cache.json")
+		saveCache(cacheFile, &CacheData{
+			ResetsAt:          "2026-01-27T10:00:00Z",
+			Utilization:       30.0,
+			WeeklyUtilization: 10.0,
+			CachedAt:          time.Now().Unix() - 10,
+		})
+		return cacheFile
+	}
+
+	run := func(t *testing.T, inputJSON string, mutate func(*Config)) string {
+		t.Helper()
+		tmpDir := t.TempDir()
+		cacheFile := makeCache(tmpDir)
+		stdout := &bytes.Buffer{}
+		sl := NewStatusLine(noopHistoryMod)
+		cfg := defaultConfig()
+		mutate(cfg)
+		if err := sl.runWithConfig(strings.NewReader(inputJSON), stdout, cacheFile, cfg); err != nil {
+			t.Fatalf("runWithConfig failed: %v", err)
+		}
+		return stdout.String()
+	}
+
+	// effort
+	t.Run("appends effort to model with hyphen", func(t *testing.T) {
+		out := run(t, `{"model":{"display_name":"Opus 4.8 (1M context)"},"effort":{"level":"high"}}`,
+			func(c *Config) { c.ShowEffort = true })
+		if !strings.Contains(out, "Model: Opus 4.8 (1M context) - high") {
+			t.Errorf("output should contain effort appended to model, got: %s", out)
+		}
+	})
+
+	t.Run("does not append effort when ShowEffort is false", func(t *testing.T) {
+		out := run(t, `{"model":{"display_name":"Opus 4.8"},"effort":{"level":"high"}}`,
+			func(c *Config) { c.ShowEffort = false })
+		if strings.Contains(out, "- high") {
+			t.Errorf("output should not contain effort when ShowEffort is false, got: %s", out)
+		}
+	})
+
+	t.Run("does not append effort when effort is null", func(t *testing.T) {
+		out := run(t, `{"model":{"display_name":"Opus 4.8"}}`,
+			func(c *Config) { c.ShowEffort = true })
+		if strings.Contains(out, "Model: Opus 4.8 -") {
+			t.Errorf("output should not append hyphen when effort is null, got: %s", out)
+		}
+	})
+
+	t.Run("does not append effort when level is empty", func(t *testing.T) {
+		out := run(t, `{"model":{"display_name":"Opus 4.8"},"effort":{"level":""}}`,
+			func(c *Config) { c.ShowEffort = true })
+		if strings.Contains(out, "Model: Opus 4.8 -") {
+			t.Errorf("output should not append hyphen when level is empty, got: %s", out)
+		}
+	})
+
+	t.Run("no model segment when ShowModel is false even if ShowEffort is true", func(t *testing.T) {
+		out := run(t, `{"model":{"display_name":"Opus 4.8"},"effort":{"level":"high"}}`,
+			func(c *Config) { c.ShowModel = false; c.ShowEffort = true })
+		if strings.Contains(out, "Model:") {
+			t.Errorf("output should not contain model segment when ShowModel is false, got: %s", out)
+		}
+	})
+
+	// thinking
+	t.Run("shows thinking when enabled", func(t *testing.T) {
+		out := run(t, `{"model":{"display_name":"Opus 4.8"},"thinking":{"enabled":true}}`,
+			func(c *Config) { c.ShowThinking = true })
+		if !strings.Contains(out, "| thinking |") {
+			t.Errorf("output should contain 'thinking' segment, got: %s", out)
+		}
+	})
+
+	t.Run("hides thinking when disabled", func(t *testing.T) {
+		out := run(t, `{"model":{"display_name":"Opus 4.8"},"thinking":{"enabled":false}}`,
+			func(c *Config) { c.ShowThinking = true })
+		if strings.Contains(out, "thinking") {
+			t.Errorf("output should not contain 'thinking' when disabled, got: %s", out)
+		}
+	})
+
+	t.Run("hides thinking when thinking is null", func(t *testing.T) {
+		out := run(t, `{"model":{"display_name":"Opus 4.8"}}`,
+			func(c *Config) { c.ShowThinking = true })
+		if strings.Contains(out, "thinking") {
+			t.Errorf("output should not contain 'thinking' when null, got: %s", out)
+		}
+	})
+
+	t.Run("hides thinking when ShowThinking is false", func(t *testing.T) {
+		out := run(t, `{"model":{"display_name":"Opus 4.8"},"thinking":{"enabled":true}}`,
+			func(c *Config) { c.ShowThinking = false })
+		if strings.Contains(out, "thinking") {
+			t.Errorf("output should not contain 'thinking' when ShowThinking is false, got: %s", out)
+		}
+	})
+
+	// output_style
+	t.Run("shows style when ShowOutputStyle is true", func(t *testing.T) {
+		out := run(t, `{"model":{"display_name":"Opus 4.8"},"output_style":{"name":"default"}}`,
+			func(c *Config) { c.ShowOutputStyle = true })
+		if !strings.Contains(out, "style: default") {
+			t.Errorf("output should contain 'style: default', got: %s", out)
+		}
+	})
+
+	t.Run("hides style when output_style is null", func(t *testing.T) {
+		out := run(t, `{"model":{"display_name":"Opus 4.8"}}`,
+			func(c *Config) { c.ShowOutputStyle = true })
+		if strings.Contains(out, "style:") {
+			t.Errorf("output should not contain 'style:' when null, got: %s", out)
+		}
+	})
+
+	t.Run("hides style when ShowOutputStyle is false", func(t *testing.T) {
+		out := run(t, `{"model":{"display_name":"Opus 4.8"},"output_style":{"name":"default"}}`,
+			func(c *Config) { c.ShowOutputStyle = false })
+		if strings.Contains(out, "style:") {
+			t.Errorf("output should not contain 'style:' when ShowOutputStyle is false, got: %s", out)
+		}
+	})
+
+	// defaults
+	t.Run("new flags are false by default", func(t *testing.T) {
+		cfg := defaultConfig()
+		if cfg.ShowEffort {
+			t.Error("ShowEffort should be false by default")
+		}
+		if cfg.ShowThinking {
+			t.Error("ShowThinking should be false by default")
+		}
+		if cfg.ShowOutputStyle {
+			t.Error("ShowOutputStyle should be false by default")
 		}
 	})
 }
